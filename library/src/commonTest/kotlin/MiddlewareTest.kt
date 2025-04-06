@@ -30,11 +30,7 @@ class MiddlewareTest {
     fun `should execute middleware and update state`() = runTest {
         val middlewareCalled = mutableListOf<String>()
         
-        val loggingMiddleware: Middleware<TestState> = { store, next, action ->
-            middlewareCalled.add("logging")
-            val result = next(action)
-            result
-        }
+        val loggingMiddleware = createTracingMiddleware<TestState>(middlewareCalled, "logging")
         
         val store = createStoreForTest(TestState()) {
             middleware {
@@ -49,11 +45,9 @@ class MiddlewareTest {
             }
         }
         
-        store.dispatch(AddAction(1))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, AddAction(1))
         
         assertTrue(middlewareCalled.isNotEmpty(), "Middleware should be called")
-        
         assertEquals(1, store.state.value.count, "State should be updated")
     }
     
@@ -76,9 +70,7 @@ class MiddlewareTest {
             }
         }
         
-        store.dispatch(IncrementAction(3))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(3))
         
         assertEquals(2, logs.size, "Logger should capture before and after messages")
         assertTrue(logs[0].contains("Action: IncrementAction"), 
@@ -94,19 +86,8 @@ class MiddlewareTest {
         val logs = mutableListOf<String>()
         val middlewareExecutionOrder = mutableListOf<String>()
         
-        val customMiddleware1: Middleware<TestState> = { store, next, action ->
-            middlewareExecutionOrder.add("middleware1 before")
-            val result = next(action)
-            middlewareExecutionOrder.add("middleware1 after")
-            result
-        }
-        
-        val customMiddleware2: Middleware<TestState> = { store, next, action ->
-            middlewareExecutionOrder.add("middleware2 before")
-            val result = next(action)
-            middlewareExecutionOrder.add("middleware2 after")
-            result
-        }
+        val customMiddleware1 = createTracingMiddleware<TestState>(middlewareExecutionOrder, "middleware1")
+        val customMiddleware2 = createTracingMiddleware<TestState>(middlewareExecutionOrder, "middleware2")
         
         val initialState = TestState()
         val store = createStoreForTest(initialState) {
@@ -126,17 +107,15 @@ class MiddlewareTest {
             }
         }
         
-        store.dispatch(IncrementAction(1))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(1))
         
         assertEquals(6, middlewareExecutionOrder.size, "All middleware phases should execute")
-        assertEquals("middleware1 before", middlewareExecutionOrder[0])
+        assertEquals("middleware1:before", middlewareExecutionOrder[0])
         assertEquals("logger before", middlewareExecutionOrder[1])
-        assertEquals("middleware2 before", middlewareExecutionOrder[2])
-        assertEquals("middleware2 after", middlewareExecutionOrder[3])
+        assertEquals("middleware2:before", middlewareExecutionOrder[2])
+        assertEquals("middleware2:after", middlewareExecutionOrder[3])
         assertEquals("logger after", middlewareExecutionOrder[4])
-        assertEquals("middleware1 after", middlewareExecutionOrder[5])
+        assertEquals("middleware1:after", middlewareExecutionOrder[5])
         
         assertEquals(1, store.state.value.counter)
     }
@@ -159,16 +138,12 @@ class MiddlewareTest {
             }
             reduceWith(reducer)
         }
-        
-        store.dispatch(ErrorAction("Test error"))
 
-        advanceUntilIdle()
+        dispatchAndAdvance(store, ErrorAction("Test error"))
 
         assertEquals(0, store.state.value.counter)
-        
-        store.dispatch(IncrementAction(5))
 
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(5))
 
         assertEquals(5, store.state.value.counter)
     }
@@ -188,12 +163,7 @@ class MiddlewareTest {
             result
         }
         
-        val afterMiddleware: Middleware<TestState> = { store, next, action ->
-            actionsProcessed.add("after middleware before")
-            val result = next(action)
-            actionsProcessed.add("after middleware after")
-            result
-        }
+        val afterMiddleware = createTracingMiddleware<TestState>(actionsProcessed, "after middleware")
         
         val store = createStoreForTest(initialState) {
             middleware {
@@ -215,9 +185,9 @@ class MiddlewareTest {
         advanceUntilIdle()
 
         assertEquals(3, actionsProcessed.size)
-        assertEquals("after middleware before", actionsProcessed[0])
+        assertEquals("after middleware:before", actionsProcessed[0])
         assertEquals("error middleware before", actionsProcessed[1])
-        assertEquals("after middleware after", actionsProcessed[2])
+        assertEquals("after middleware:after", actionsProcessed[2])
 
         actionsProcessed.clear()
         store.dispatch(IncrementAction(3))
@@ -225,10 +195,10 @@ class MiddlewareTest {
         advanceUntilIdle()
 
         assertEquals(4, actionsProcessed.size)
-        assertEquals("after middleware before", actionsProcessed[0])
+        assertEquals("after middleware:before", actionsProcessed[0])
         assertEquals("error middleware before", actionsProcessed[1])
         assertEquals("error middleware after", actionsProcessed[2])
-        assertEquals("after middleware after", actionsProcessed[3])
+        assertEquals("after middleware:after", actionsProcessed[3])
         
         assertEquals(3, store.state.value.counter)
     }
@@ -237,20 +207,8 @@ class MiddlewareTest {
     fun `should follow nested middleware execution order`() = runTest(timeout = 5.seconds) {
         val executionOrder = mutableListOf<String>()
         
-        val firstMiddleware: Middleware<TestState> = { store, next, action ->
-            executionOrder.add("first-before")
-            val result = next(action)
-            executionOrder.add("first-after")
-            result
-        }
-        
-        val secondMiddleware: Middleware<TestState> = { store, next, action ->
-            executionOrder.add("second-before")
-            val result = next(action)
-            executionOrder.add("second-after")
- 
-            result
-        }
+        val firstMiddleware = createTracingMiddleware<TestState>(executionOrder, "first")
+        val secondMiddleware = createTracingMiddleware<TestState>(executionOrder, "second")
         
         val store = createStoreForTest(TestState()) {
             middleware {
@@ -264,37 +222,26 @@ class MiddlewareTest {
             }
         }
         
-        store.dispatch(IncrementAction(5))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(5))
         
-        
-        assertEquals("first-before", executionOrder[0], "First middleware should start execution first")
-        assertEquals("second-before", executionOrder[1], "Second middleware should start execution second")
+        assertEquals("first:before", executionOrder[0], "First middleware should start execution first")
+        assertEquals("second:before", executionOrder[1], "Second middleware should start execution second")
         assertEquals("reducer", executionOrder[2], "Reducer should execute after all middleware starts")
-        assertEquals("second-after", executionOrder[3], "Second middleware should finish before first middleware")
-        assertEquals("first-after", executionOrder[4], "First middleware should finish last")
+        assertEquals("second:after", executionOrder[3], "Second middleware should finish before first middleware")
+        assertEquals("first:after", executionOrder[4], "First middleware should finish last")
     }
     
     @Test
     fun `should process actions through middleware chain in correct sequence`() = runTest(timeout = 5.seconds) {
         val executionOrder = mutableListOf<String>()
         
+        val middleware1 = createTracingMiddleware<TestState>(executionOrder, "middleware1")
+        val middleware2 = createTracingMiddleware<TestState>(executionOrder, "middleware2")
+        
         val store = createStoreForTest(TestState()) {
-            
             middleware {
-                middleware { store, next, action ->
-                    executionOrder.add("middleware1:before")
-                    val result = next(action)
-                    executionOrder.add("middleware1:after")
-                    result
-                }
-                
-                middleware { store, next, action ->
-                    executionOrder.add("middleware2:before")
-                    val result = next(action)
-                    executionOrder.add("middleware2:after")
-                    result
-                }
+                middleware(middleware1)
+                middleware(middleware2)
             }
             
             reduceWith { state, action ->
@@ -306,13 +253,9 @@ class MiddlewareTest {
                 }
             }
         }
-        
-        store.dispatch(SimpleAction("test"))
-        runCurrent()
-        advanceTimeBy(100)
-        advanceUntilIdle()
-        
-        
+
+        dispatchAndAdvance(store, SimpleAction("test1"))
+
         assertTrue(executionOrder.isNotEmpty(), "Middleware should have executed")
         
         assertEquals("middleware1:before", executionOrder[0], "First middleware should execute first")

@@ -34,8 +34,6 @@ class MapActionCacheTest {
         assertNotNull(retrieved, "Getting a cached action should not return null")
         assertEquals(expiry, retrieved.expiresAfter, "Cached expiry time should match")
         assertEquals(resultAction, retrieved.action, "Cached action should match")
-        
-        advanceUntilIdle()
     }
     
     @Test
@@ -59,8 +57,6 @@ class MapActionCacheTest {
         assertNotNull(secondRetrieved)
         assertEquals(secondResult, secondRetrieved.action, "Second cache entry should overwrite first")
         assertEquals(secondExpiry, secondRetrieved.expiresAfter, "Updated expiry should be stored")
-        
-        advanceUntilIdle()
     }
     
     @Test
@@ -89,8 +85,6 @@ class MapActionCacheTest {
         assertEquals(result1, cache.get(action1)?.action, "First action should be retrievable")
         assertEquals(result2, cache.get(action2)?.action, "Second action should be retrievable")
         assertNull(cache.get(action3), "Uncached action should return null")
-        
-        advanceUntilIdle()
     }
     
     @Test

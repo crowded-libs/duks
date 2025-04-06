@@ -71,9 +71,7 @@ class StoreTest {
             }
         }
         
-        store.dispatch(IncrementAction(5))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(5))
         
         assertEquals(5, store.state.value.counter)
     }
@@ -92,17 +90,13 @@ class StoreTest {
             }
         }
         
-        store.dispatch(IncrementAction(5))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(5))
         
         assertEquals(1, actionsProcessed.size)
         assertTrue(actionsProcessed[0] is IncrementAction)
         assertEquals(5, store.state.value.counter)
         
-        store.dispatch(DecrementAction(2))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, DecrementAction(2))
         
         assertEquals(2, actionsProcessed.size)
         assertTrue(actionsProcessed[1] is DecrementAction)
@@ -114,23 +108,19 @@ class StoreTest {
         val initialState = TestState()
         val actionsProcessed = mutableListOf<String>()
         
-        val trackingMiddleware: Middleware<TestState> = { store, next, action ->
-            actionsProcessed.add("Before: ${action::class.simpleName}")
-            val result = next(action)
-            actionsProcessed.add("After: ${action::class.simpleName}")
-            result
-        }
-        
         val store = createStoreForTest(initialState) {
             middleware {
-                middleware(trackingMiddleware)
+                middleware { store, next, action ->
+                    actionsProcessed.add("Before: ${action::class.simpleName}")
+                    val result = next(action)
+                    actionsProcessed.add("After: ${action::class.simpleName}")
+                    result
+                }
             }
             reduceWith { state, _ -> state }
         }
         
-        store.dispatch(IncrementAction(5))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(5))
         
         assertEquals(2, actionsProcessed.size)
         assertEquals("Before: IncrementAction", actionsProcessed[0])
@@ -152,9 +142,7 @@ class StoreTest {
         }
         
         store.dispatch(IncrementAction(5))
-        store.dispatch(AddMessageAction("Hello"))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, AddMessageAction("Hello"))
         
         assertEquals(5, store.state.value.counter)
         assertEquals(1, store.state.value.messages.size)
@@ -179,9 +167,7 @@ class StoreTest {
             }
         }
         
-        store.dispatch(IncrementAction(3))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(3))
         
         assertEquals(2, logs.size)
         assertTrue(logs[0].contains("Action:"))
@@ -207,13 +193,11 @@ class StoreTest {
             }
         }
         
-        store.dispatch(IncrementAction(1))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(1))
         
         assertEquals(1, store.state.value.counter)
         
-        store.dispatch(ErrorAction("Test error"))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, ErrorAction("Test error"))
         
         assertEquals(1, errors.size)
         assertTrue(errors[0].contains("Test error"))
@@ -261,9 +245,7 @@ class StoreTest {
             }
         }
         
-        store.dispatch(TestAsyncAction())
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, TestAsyncAction())
         
         assertTrue(processedActions.size >= 4, "Should have processed at least 4 actions")
         assertTrue(processedActions.any { it is TestAsyncAction })
@@ -299,9 +281,7 @@ class StoreTest {
             }
         }
         
-        store.dispatch(IncrementAction(5))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(5))
         
         assertTrue(processedActions.size >= 2, "Should have processed at least 2 actions")
         assertTrue(processedActions.any { it is IncrementAction })

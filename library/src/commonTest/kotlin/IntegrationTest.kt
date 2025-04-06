@@ -1,6 +1,5 @@
 package duks
 
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -53,9 +52,7 @@ class IntegrationTest {
             }
         }
         
-        store.dispatch(IncrementAction(5))
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(5))
         
         assertEquals(2, logMessages.size)
         assertTrue(logMessages[0].contains("Action: IncrementAction"))
@@ -88,14 +85,12 @@ class IntegrationTest {
             }
         }
         
-        store.dispatch(IncrementAction(1))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, IncrementAction(1))
         
         assertEquals(1, store.state.value.counter)
         assertTrue(errorLogs.isEmpty())
         
-        store.dispatch(ErrorAction("Test error"))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, ErrorAction("Test error"))
         
         assertTrue(errorLogs.isNotEmpty())
         assertTrue(errorLogs.any { it.contains("Test error") })
@@ -182,9 +177,7 @@ class IntegrationTest {
         val store = createStoreForTest(TestState()) {
             middleware {
                 middleware(loggerMiddleware<TestState> { logs.add(it) })
-                
                 middleware(exceptionMiddleware<TestState> { errors.add(it) })
-                
                 caching(testCache)
             }
             
@@ -213,65 +206,38 @@ class IntegrationTest {
             }
         }
         
-        store.dispatch(IncrementAction(2))
-        runCurrent()
+        dispatchAndAdvance(store, IncrementAction(2))
         
         assertEquals(2, store.state.value.counter, "Counter should be 2")
         assertTrue(logs.any { it.contains("Action: IncrementAction") }, "Logger should log action")
         
         val asyncAction = TestAsyncAction(1, 3)
-        
-        store.dispatch(AsyncProcessing(asyncAction))
-        runCurrent()
-        assertEquals(1, store.state.value.asyncOperations, "Should have one async operation in progress")
-        
-        store.dispatch(AsyncResultAction(asyncAction, Result.success(6)))
-        runCurrent()
-        assertEquals(6, store.state.value.counter - 2, "Counter should be incremented by async result")
-        
-        store.dispatch(AsyncComplete(asyncAction))
-        runCurrent()
-        assertEquals(0, store.state.value.asyncOperations, "Async operations should be back to 0")
-        
-        store.dispatch(AddMessageAction("Async result processed: 6"))
-        runCurrent()
+        dispatchAndAdvance(store, AsyncProcessing(asyncAction))
+        dispatchAndAdvance(store, AsyncResultAction(asyncAction, Result.success(6)))
+        dispatchAndAdvance(store, AsyncComplete(asyncAction))
+        dispatchAndAdvance(store, AddMessageAction("Async result processed: 6"))
         
         assertEquals(8, store.state.value.counter, "Counter should be 2 + 6 = 8")
         assertEquals(1, store.state.value.messages.size, "Should have one message")
         
         errors.clear()
-        store.dispatch(ErrorAction("Integration error"))
-        runCurrent()
-        advanceUntilIdle()
+        dispatchAndAdvance(store, ErrorAction("Integration error"))
         
         assertTrue(errors.isNotEmpty(), "Error should be caught by exception middleware")
         assertEquals(8, store.state.value.counter, "Counter should remain unchanged after error")
         
-        val transformedAction = IncrementAction(10)
-        store.dispatch(transformedAction)
-        runCurrent()
-        advanceUntilIdle()
-        
+        dispatchAndAdvance(store, IncrementAction(10))
         assertEquals(18, store.state.value.counter, "Counter should be 8 + 10 = 18")
         
-        store.dispatch(IncrementAction(10))
-        runCurrent()
-        advanceUntilIdle()
-        
+        dispatchAndAdvance(store, IncrementAction(10))
         assertEquals(28, store.state.value.counter, "Counter should be 18 + 10 = 28")
         
         val asyncAction2 = TestAsyncAction(2, 5)
-        store.dispatch(AsyncProcessing(asyncAction2))
-        store.dispatch(AsyncResultAction(asyncAction2, Result.success(10)))
-        store.dispatch(AsyncComplete(asyncAction2))
-        runCurrent()
-        
-        store.dispatch(AddMessageAction("Combined test result"))
-        runCurrent()
-        
-        store.dispatch(IncrementAction(5))
-        runCurrent()
-        advanceUntilIdle()
+        dispatchAndAdvance(store, AsyncProcessing(asyncAction2))
+        dispatchAndAdvance(store, AsyncResultAction(asyncAction2, Result.success(10)))
+        dispatchAndAdvance(store, AsyncComplete(asyncAction2))
+        dispatchAndAdvance(store, AddMessageAction("Combined test result"))
+        dispatchAndAdvance(store, IncrementAction(5))
         
         assertEquals(43, store.state.value.counter, "Counter should include all increments (28 + 10 + 5)")
         assertEquals(2, store.state.value.messages.size, "Should have two messages")

@@ -1,6 +1,7 @@
 package duks
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -70,7 +71,7 @@ class AsyncTest {
         }
         
         val errorMessage = "Test error message"
-        store.dispatch(FailingAsyncAction(errorMessage))
+        dispatchAndAdvance(store, FailingAsyncAction(errorMessage))
         
         assertEquals(errorMessage, store.state.value.error, 
             "Error from failing async action should be captured in state")

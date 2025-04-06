@@ -1,6 +1,5 @@
 package duks
 
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DateTimeUnit
@@ -63,9 +62,7 @@ class CachingTest {
         }
         
         val action1 = CacheableTestAction(1, 5)
-        store.dispatch(action1)
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, action1)
         
         assertEquals(1, processedActions.size)
         assertEquals(CacheableTestAction(1, 5), processedActions[0])
@@ -73,9 +70,7 @@ class CachingTest {
         assertEquals(10, store.state.value.counter)
         
         processedActions.clear()
-        store.dispatch(action1)
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, action1)
         
         assertEquals(1, processedActions.size, "Transformer should receive one action")
         assertTrue(processedActions[0] is ResultAction, "Transformer should receive cached ResultAction, not original CacheableTestAction")
@@ -84,9 +79,7 @@ class CachingTest {
         
         processedActions.clear()
         val action2 = CacheableTestAction(2, 7)
-        store.dispatch(action2)
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, action2)
         
         assertEquals(1, processedActions.size)
         assertEquals(CacheableTestAction(2, 7), processedActions[0])
@@ -129,9 +122,7 @@ class CachingTest {
         }
         
         val action1 = ShortExpirationAction(5)
-        store.dispatch(action1)
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, action1)
         
         assertEquals(1, processedActions.size)
         assertEquals(ShortExpirationAction(5), processedActions[0])
@@ -139,9 +130,7 @@ class CachingTest {
         assertEquals(5, store.state.value.counter)
         
         processedActions.clear()
-        store.dispatch(action1)
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, action1)
         
         assertEquals(1, processedActions.size, "Transformer should receive one action")
         assertTrue(processedActions[0] is ResultAction, "Transformer should receive cached ResultAction, not original action")
@@ -151,9 +140,7 @@ class CachingTest {
         testCache.expireAll()
         
         processedActions.clear()
-        store.dispatch(action1)
-        
-        advanceUntilIdle()
+        dispatchAndAdvance(store, action1)
         
         assertEquals(1, processedActions.size)
         assertEquals(ShortExpirationAction(5), processedActions[0])
@@ -165,20 +152,8 @@ class CachingTest {
     fun `should execute middleware in correct order with caching`() = runTest(timeout = 5.seconds) {
         val executionOrder = mutableListOf<String>()
         
-        val firstMiddleware: Middleware<TestState> = { store, next, action ->
-            executionOrder.add("first-before")
-            val result = next(action)
-            executionOrder.add("first-after")
-            result
-        }
-        
-        val secondMiddleware: Middleware<TestState> = { store, next, action ->
-            executionOrder.add("second-before")
-            val result = next(action)
-            executionOrder.add("second-after")
- 
-            result
-        }
+        val firstMiddleware = createTracingMiddleware<TestState>(executionOrder, "first")
+        val secondMiddleware = createTracingMiddleware<TestState>(executionOrder, "second")
         
         val store = createStoreForTest(TestState()) {
             middleware {
@@ -192,15 +167,13 @@ class CachingTest {
             }
         }
         
-        store.dispatch(CacheableTestAction(1, 5))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, CacheableTestAction(1, 5))
         
-        
-        assertEquals("first-before", executionOrder[0], "First middleware should start execution first")
-        assertEquals("second-before", executionOrder[1], "Second middleware should start execution second")
+        assertEquals("first:before", executionOrder[0], "First middleware should start execution first")
+        assertEquals("second:before", executionOrder[1], "Second middleware should start execution second")
         assertEquals("reducer", executionOrder[2], "Reducer should execute after all middleware starts")
-        assertEquals("second-after", executionOrder[3], "Second middleware should finish before first middleware")
-        assertEquals("first-after", executionOrder[4], "First middleware should finish last")
+        assertEquals("second:after", executionOrder[3], "Second middleware should finish before first middleware")
+        assertEquals("first:after", executionOrder[4], "First middleware should finish last")
     }
     
     @Test
@@ -264,16 +237,14 @@ class CachingTest {
         }
         
         actionSequence.add("=== FIRST DISPATCH (SHOULD TRANSFORM) ===")
-        store.dispatch(CacheableTestAction(1, 5))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, CacheableTestAction(1, 5))
         
         assertEquals(10, store.state.value.counter, "Counter should be updated with transformed value")
         
         receivedActions.forEach { (_, list) -> list.clear() }
         
         actionSequence.add("=== SECOND DISPATCH (SHOULD USE CACHE) ===")
-        store.dispatch(CacheableTestAction(1, 5))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, CacheableTestAction(1, 5))
         
         assertEquals(20, store.state.value.counter, "Counter should be updated twice")
         
@@ -317,20 +288,11 @@ class CachingTest {
             }
         }
         
-        store.dispatch(CacheableTestAction(1, 5))
-        advanceUntilIdle()
-        
-        store.dispatch(CacheableTestAction(2, 3))
-        advanceUntilIdle()
-        
-        store.dispatch(CacheableTestAction(1, 5))
-        advanceUntilIdle()
-        
-        store.dispatch(ShortExpirationAction(7))
-        advanceUntilIdle()
-        
-        store.dispatch(CacheableTestAction(1, 5))
-        advanceUntilIdle()
+        dispatchAndAdvance(store, CacheableTestAction(1, 5))
+        dispatchAndAdvance(store, CacheableTestAction(2, 3))
+        dispatchAndAdvance(store, CacheableTestAction(1, 5))
+        dispatchAndAdvance(store, ShortExpirationAction(7))
+        dispatchAndAdvance(store, CacheableTestAction(1, 5))
         
         assertEquals(3, transformerCalls.size, "Transformer should be called 3 times")
         assertEquals("CacheableTestAction:1", transformerCalls[0])
