@@ -3,6 +3,7 @@ package duks
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableSharedFlow
 
 /**
  * Represents a reducer function in the Duks state management system.
@@ -40,6 +41,15 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
                                                      internal val ioScope: CoroutineScope) {
     
     private val _state = mutableStateOf(initialState)
+    private val _dispatchFlow = MutableSharedFlow<Action>(extraBufferCapacity = 100)
+
+    init {
+        ioScope.launch {
+            _dispatchFlow.collect { action ->
+                middleware(this@KStore, { a -> this@KStore.applyReducer(a) }, action)
+            }
+        }
+    }
 
     /**
      * The current state of the store, exposed as a Compose State object.
@@ -59,14 +69,13 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      * @param action The action to dispatch
      */
     fun dispatch(action: Action) {
-        val store = this
         ioScope.launch {
-            middleware(store, {a -> store.actualDispatch(a)}, action)
+            _dispatchFlow.tryEmit(action)
         }
     }
 
     /**
-     * Internally handles the actual dispatch after middleware processing.
+     * Internally handles calling the reducer after middleware processing.
      *
      * This method applies the reducer to the current state and the action,
      * and updates the state if a new value is produced.
@@ -74,12 +83,11 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      * @param action The action to dispatch
      * @return The original action (for middleware chaining)
      */
-    private fun actualDispatch(action: Action) : Action {
-        val newValue = reducer(_state.value, action)
-        if(newValue != _state.value) {
-            uiScope.launch {
-                _state.value = reducer(_state.value, action)
-            }
+    private fun applyReducer(action: Action) : Action {
+        val originalValue = _state.value
+        val newValue = reducer(originalValue, action)
+        if(newValue != originalValue) {
+            _state.value = newValue
         }
         return action
     }

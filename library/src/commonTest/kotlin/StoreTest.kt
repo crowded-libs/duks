@@ -2,6 +2,7 @@ package duks
 
 import kotlin.test.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.toList
 import kotlinx.coroutines.test.*
 
 class StoreTest {
@@ -91,7 +92,7 @@ class StoreTest {
         }
         
         dispatchAndAdvance(store, IncrementAction(5))
-        
+
         assertEquals(1, actionsProcessed.size)
         assertTrue(actionsProcessed[0] is IncrementAction)
         assertEquals(5, store.state.value.counter)
@@ -246,12 +247,14 @@ class StoreTest {
         }
         
         dispatchAndAdvance(store, TestAsyncAction())
+
+        val actions = processedActions.toList()
         
-        assertTrue(processedActions.size >= 4, "Should have processed at least 4 actions")
-        assertTrue(processedActions.any { it is TestAsyncAction })
-        assertTrue(processedActions.any { it is AsyncProcessing })
-        assertTrue(processedActions.any { it is AsyncResultAction<*> })
-        assertTrue(processedActions.any { it is AsyncComplete })
+        assertTrue(actions.size >= 4, "Should have processed at least 4 actions")
+        assertTrue(actions.any { it is TestAsyncAction })
+        assertTrue(actions.any { it is AsyncProcessing })
+        assertTrue(actions.any { it is AsyncResultAction<*> })
+        assertTrue(actions.any { it is AsyncComplete })
         
         assertEquals(42, store.state.value.counter)
     }
@@ -282,10 +285,11 @@ class StoreTest {
         }
         
         dispatchAndAdvance(store, IncrementAction(5))
+        val actions = processedActions.toList()
         
-        assertTrue(processedActions.size >= 2, "Should have processed at least 2 actions")
-        assertTrue(processedActions.any { it is IncrementAction })
-        assertTrue(processedActions.any { it is AddMessageAction })
+        assertTrue(actions.size >= 2, "Should have processed at least 2 actions")
+        assertTrue(actions.any { it is IncrementAction })
+        assertTrue(actions.any { it is AddMessageAction })
         
         assertEquals(5, store.state.value.counter)
         assertEquals(1, store.state.value.messages.size)
