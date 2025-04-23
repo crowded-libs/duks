@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.dokka)
     alias(libs.plugins.vanniktech.mavenPublish)
+    alias(libs.plugins.composeCompiler)
 }
 
 group = "io.github.crowded-libs"

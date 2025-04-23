@@ -94,13 +94,13 @@ val store = createStore(CounterState()) {
         // Add built-in middleware
         logging()
         async()
-        
+
         // Add custom middleware
         middleware { store, action, next ->
             println("Custom middleware: $action")
             next(action)
         }
-        
+
         // Add sagas for complex workflows
         sagas {
             on<FetchUserData> { action ->
@@ -112,7 +112,7 @@ val store = createStore(CounterState()) {
             }
         }
     }
-    
+
     // Add your reducer
     reduceWith(counterReducer)
 }
@@ -131,14 +131,14 @@ Duks integrates smoothly with Jetpack Compose. The store's state is exposed as a
 fun CounterScreen(store: KStore<CounterState>) {
     // Access store state in a Compose-friendly way
     val state by remember { store.state }
-    
+
     Column(modifier = Modifier.padding(16.dp)) {
         Text(text = "Count: ${state.count}")
-        
+
         Button(onClick = { store.dispatch(Increment()) }) {
             Text("Increment")
         }
-        
+
         Button(onClick = { store.dispatch(Increment(5)) }) {
             Text("Increment by 5")
         }
@@ -224,12 +224,12 @@ fun TodoApp() {
             reduceWith(todoReducer)
         }
     }
-    
+
     // Load todos when the screen first appears
     LaunchedEffect(Unit) {
         store.dispatch(LoadTodos())
     }
-    
+
     TodoScreen(store)
 }
 
@@ -237,7 +237,7 @@ fun TodoApp() {
 fun TodoScreen(store: KStore<TodoState>) {
     // Remember the state from the store
     val state by remember { store.state }
-    
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Input field and add button
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -247,7 +247,7 @@ fun TodoScreen(store: KStore<TodoState>) {
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Add a todo") }
             )
-            
+
             Button(
                 onClick = { 
                     if (state.inputText.isNotBlank()) {
@@ -259,14 +259,14 @@ fun TodoScreen(store: KStore<TodoState>) {
                 Text("Add")
             }
         }
-        
+
         // Loading indicator
         if (state.isLoading) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(16.dp)
             )
         }
-        
+
         // Todo list
         LazyColumn(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
@@ -294,7 +294,7 @@ fun TodoItem(todo: TodoItem, onToggle: () -> Unit, onDelete: () -> Unit) {
             checked = todo.completed,
             onCheckedChange = { onToggle() }
         )
-        
+
         Text(
             text = todo.text,
             modifier = Modifier
@@ -303,7 +303,7 @@ fun TodoItem(todo: TodoItem, onToggle: () -> Unit, onDelete: () -> Unit) {
             textDecoration = if (todo.completed) TextDecoration.LineThrough else null,
             color = if (todo.completed) Color.Gray else Color.Black
         )
-        
+
         IconButton(onClick = onDelete) {
             Icon(Icons.Default.Delete, contentDescription = "Delete")
         }
@@ -318,6 +318,170 @@ This example demonstrates how to:
 4. Use the store within Compose components
 5. Access and observe the state using `remember { store.state }`
 6. Dispatch actions in response to user interactions
+
+### Real World Example
+
+Here's a more advanced example that demonstrates good practices for structuring a real-world application with Duks:
+
+```kotlin
+// 1. Define the state
+data class AppState(
+    val counter: Int = 0,
+    val isLoading: Boolean = false,
+    val error: String? = null
+) : StateModel
+
+// 2. Define actions
+sealed class CounterAction : Action {
+    object Increment : CounterAction()
+    object Decrement : CounterAction()
+    data class SetCounter(val value: Int) : CounterAction()
+}
+
+// 3. Create the reducer
+val counterReducer: Reducer<AppState> = { state, action ->
+    when (action) {
+        is CounterAction.Increment -> state.copy(counter = state.counter + 1)
+        is CounterAction.Decrement -> state.copy(counter = state.counter - 1)
+        is CounterAction.SetCounter -> state.copy(counter = action.value)
+        else -> state
+    }
+}
+
+// 4. Initialize the Store as a companion object with DSL
+class Store private constructor() {
+    companion object {
+        // Initialize the store with DSL
+        val instance by lazy {
+            createStore(AppState()) {
+                middleware {
+                    logging()
+                    async()
+                }
+                reduceWith(counterReducer)
+            }
+        }
+    }
+}
+
+// 5. Set up global app state and dispatch function
+val appState by lazy { Store.instance.state }
+fun dispatch(action: Action) = Store.instance.dispatch(action)
+
+// 6. Create props data class for the screen
+data class CounterScreenProps(
+    val counter: Int,
+    val onIncrement: () -> Unit,
+    val onDecrement: () -> Unit,
+    val onSetCounter: (Int) -> Unit
+)
+
+// 7. Create Screen function that maps state to props using mapToProps extension
+@Composable
+fun CounterScreen() {
+    // Use mapToProps to extract and memoize only the needed slice of state
+    val props = appState.mapToProps { 
+        CounterScreenProps(
+            counter = counter,
+            onIncrement = { dispatch(CounterAction.Increment) },
+            onDecrement = { dispatch(CounterAction.Decrement) },
+            onSetCounter = { value -> dispatch(CounterAction.SetCounter(value)) }
+        )
+    }
+    CounterScreenContent(props)
+}
+
+// 8. Create ScreenContent function that only takes props
+@Composable
+fun CounterScreenContent(props: CounterScreenProps) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Counter: ${props.counter}",
+            style = MaterialTheme.typography.h4
+        )
+
+        Row(
+            modifier = Modifier.padding(top = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(onClick = props.onDecrement) {
+                Text("-")
+            }
+
+            Button(onClick = props.onIncrement) {
+                Text("+")
+            }
+        }
+
+        // Example of using the onSetCounter function
+        Button(
+            onClick = { props.onSetCounter(0) },
+            modifier = Modifier.padding(top = 8.dp)
+        ) {
+            Text("Reset")
+        }
+    }
+}
+
+// 9. Preview function that uses only the props
+@Preview
+@Composable
+fun CounterScreenPreview() {
+    // Create mock props for preview
+    val previewProps = CounterScreenProps(
+        counter = 42,
+        onIncrement = {},
+        onDecrement = {},
+        onSetCounter = {}
+    )
+
+    // Use the content function with mock props
+    CounterScreenContent(previewProps)
+}
+```
+
+This real-world example demonstrates several important patterns:
+
+1. **Store Initialization with DSL**: The Store is initialized as a companion object using the DSL, making it accessible throughout the application.
+
+2. **Global App State**: The app state is set up as a global variable using `lazy` initialization, ensuring it's only created when needed.
+
+3. **Global Dispatch Function**: A global dispatch function is created that points to the store's dispatch function, simplifying action dispatching.
+
+4. **Screen/ScreenContent Pattern**: 
+   - `CounterScreen` function handles state mapping and connects to the store
+   - `CounterScreenContent` function only takes props and is completely decoupled from the store
+
+5. **Preview-Friendly Setup**: The `CounterScreenPreview` function demonstrates how to create mock props for previewing the UI without needing a real store.
+
+### Benefits of This Approach
+
+1. **Separation of Concerns**: 
+   - The ScreenContent function is pure and only deals with UI rendering based on props
+   - The Screen function handles state mapping and store interaction
+
+2. **Testability**: 
+   - UI components can be tested in isolation by providing mock props
+   - Business logic in reducers can be tested separately from UI
+
+3. **Preview Support**: 
+   - Compose previews work without requiring a real store or state
+   - Designers can see and modify UI without worrying about state management
+
+4. **Maintainability**:
+   - Clear separation between UI and state management makes the codebase easier to maintain
+   - Changes to state management don't require changes to UI components and vice versa
+
+5. **Performance with mapToProps**:
+   - The `mapToProps` extension method memoizes the selected slice of state
+   - Only triggers recomposition when the selected data actually changes
+   - Prevents unnecessary recompositions when unrelated parts of the state change
+   - Automatically handles the extraction of only the needed properties from the state
+   - Simplifies the code by combining state selection and prop mapping in one step
 
 ### Middleware Chaining
 
@@ -343,7 +507,7 @@ sagas {
     on<UserLoginAction> { action ->
         // Execute an async action and get the result
         val result = execute(FetchUserProfile(action.userId))
-        
+
         if (result.isSuccess) {
             // Dispatch additional actions
             put(UpdateUserProfileAction(result.getOrNull()!!))
@@ -352,13 +516,13 @@ sagas {
             put(ShowErrorAction(result.exceptionOrNull()?.message ?: "Unknown error"))
         }
     }
-    
+
     // React to successful async actions
     onSuccessOf<FetchUserData, UserData> { initiator, result ->
         // Do something when FetchUserData succeeds
         put(UserDataFetchedAction(initiator.userId, result))
     }
-    
+
     // Execute actions in parallel
     on<InitializeAppAction> { _ ->
         parallel(
@@ -367,7 +531,7 @@ sagas {
             FetchNotifications()
         )
     }
-    
+
     // Execute actions in sequence
     on<CheckoutAction> { action ->
         chain(
@@ -388,7 +552,7 @@ Improve performance by caching action results:
 // Define a cacheable action
 data class FetchProductDetails(val productId: String) : CacheableAction, AsyncAction<ProductDetails> {
     override val cacheKey: String = "product-$productId"
-    
+
     override suspend fun execute(): Result<ProductDetails> {
         return try {
             // Perform async operation to fetch product details
