@@ -85,13 +85,12 @@ class SagaBuilder {
         onAny(
             { action -> 
                 action is AsyncResultAction<*> && 
-                action.result.isSuccess && 
-                action.result.getOrNull() is T
+                action.result is T
             },
             { action ->
                 val resultAction = action as AsyncResultAction<*>
                 @Suppress("UNCHECKED_CAST")
-                handler(resultAction.result.getOrNull() as T)
+                handler(resultAction.result as T)
             }
         )
     }
@@ -112,15 +111,14 @@ class SagaBuilder {
             { action -> 
                 action is AsyncResultAction<*> && 
                 action.initiatedBy is I &&
-                action.result.isSuccess && 
-                action.result.getOrNull() is R
+                action.result is R
             },
             { action ->
                 val resultAction = action as AsyncResultAction<*>
                 @Suppress("UNCHECKED_CAST")
                 handler(
                     resultAction.initiatedBy as I,
-                    resultAction.result.getOrNull() as R
+                    resultAction.result as R
                 )
             }
         )

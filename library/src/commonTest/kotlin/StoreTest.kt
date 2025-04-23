@@ -2,22 +2,21 @@ package duks
 
 import kotlin.test.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.toList
 import kotlinx.coroutines.test.*
 
 class StoreTest {
-    
+
     data class TestState(
         val counter: Int = 0, 
         val value: Int = 0,
         val messages: List<String> = emptyList()
     ) : StateModel
-    
+
     data class IncrementAction(val value: Int = 1) : Action
     data class DecrementAction(val value: Int = 1) : Action
     data class AddMessageAction(val message: String) : Action
     class ErrorAction(val message: String = "Test error") : Action
-    
+
     class TestAsyncAction(private val delayMillis: Long = 0) : AsyncAction<Int> {
         override suspend fun execute(): Result<Int> {
             if (delayMillis > 0) {
@@ -26,7 +25,7 @@ class StoreTest {
             return Result.success(42)
         }
     }
-    
+
     @Test
     fun `should create store with initial state`() = runTest {
         val store = createStoreForTest(TestState()) {
@@ -38,10 +37,10 @@ class StoreTest {
                 }
             }
         }
-        
+
         assertEquals(0, store.state.value.counter)
     }
-    
+
     @Test
     fun `should apply reducer functions directly to state`() {
         val reducer: Reducer<TestState> = { state, action ->
@@ -51,15 +50,15 @@ class StoreTest {
                 else -> state
             }
         }
-        
+
         val initialState = TestState()
         val state1 = reducer(initialState, IncrementAction(5))
         assertEquals(5, state1.counter)
-        
+
         val state2 = reducer(state1, DecrementAction(3))
         assertEquals(2, state2.counter)
     }
-    
+
     @Test
     fun `should update state when dispatching actions`() = runTest {
         val store = createStoreForTest(TestState()) {
@@ -71,16 +70,16 @@ class StoreTest {
                 }
             }
         }
-        
+
         dispatchAndAdvance(store, IncrementAction(5))
-        
+
         assertEquals(5, store.state.value.counter)
     }
-    
+
     @Test
     fun `should track actions processed by the store`() = runTest {
         val initialState = TestState()
-        
+
         val (store, actionsProcessed) = createTrackedStoreForTest(initialState) {
             reduceWith { state, action ->
                 when (action) {
@@ -90,25 +89,25 @@ class StoreTest {
                 }
             }
         }
-        
+
         dispatchAndAdvance(store, IncrementAction(5))
 
         assertEquals(1, actionsProcessed.size)
         assertTrue(actionsProcessed[0] is IncrementAction)
         assertEquals(5, store.state.value.counter)
-        
+
         dispatchAndAdvance(store, DecrementAction(2))
-        
+
         assertEquals(2, actionsProcessed.size)
         assertTrue(actionsProcessed[1] is DecrementAction)
         assertEquals(3, store.state.value.counter)
     }
-    
+
     @Test
     fun `should execute middleware before and after actions`() = runTest {
         val initialState = TestState()
         val actionsProcessed = mutableListOf<String>()
-        
+
         val store = createStoreForTest(initialState) {
             middleware {
                 middleware { store, next, action ->
@@ -120,14 +119,14 @@ class StoreTest {
             }
             reduceWith { state, _ -> state }
         }
-        
+
         dispatchAndAdvance(store, IncrementAction(5))
-        
+
         assertEquals(2, actionsProcessed.size)
         assertEquals("Before: IncrementAction", actionsProcessed[0])
         assertEquals("After: IncrementAction", actionsProcessed[1])
     }
-    
+
     @Test
     fun `should update multiple state properties correctly`() = runTest {
         val initialState = TestState()
@@ -141,19 +140,19 @@ class StoreTest {
                 }
             }
         }
-        
+
         store.dispatch(IncrementAction(5))
         dispatchAndAdvance(store, AddMessageAction("Hello"))
-        
+
         assertEquals(5, store.state.value.counter)
         assertEquals(1, store.state.value.messages.size)
         assertEquals("Hello", store.state.value.messages[0])
     }
-    
+
     @Test
     fun `should log actions with logger middleware`() = runTest {
         val logs = mutableListOf<String>()
-        
+
         val store = createStoreForTest(TestState()) {
             middleware {
                 middleware(loggerMiddleware<TestState> { message ->
@@ -167,18 +166,18 @@ class StoreTest {
                 }
             }
         }
-        
+
         dispatchAndAdvance(store, IncrementAction(3))
-        
+
         assertEquals(2, logs.size)
         assertTrue(logs[0].contains("Action:"))
         assertTrue(logs[1].contains("After Action:"))
     }
-    
+
     @Test
     fun `should handle exceptions with exception middleware`() = runTest {
         val errors = mutableListOf<String>()
-        
+
         val store = createStoreForTest(TestState()) {
             middleware {
                 middleware(exceptionMiddleware<TestState> { error ->
@@ -193,88 +192,93 @@ class StoreTest {
                 }
             }
         }
-        
+
         dispatchAndAdvance(store, IncrementAction(1))
-        
+
         assertEquals(1, store.state.value.counter)
-        
+
         dispatchAndAdvance(store, ErrorAction("Test error"))
-        
+
         assertEquals(1, errors.size)
         assertTrue(errors[0].contains("Test error"))
     }
-    
+
     @Test
     fun `should process async actions correctly`() = runTest {
         val (store, processedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 middleware({ store, next, action ->
                     if (action is AsyncAction<*>) {
-                        val processingAction = AsyncProcessing(action)
+                        val processingAction = action.createProcessingAction()
                         store.dispatch(processingAction)
-                        
+
                         val result = (action as TestAsyncAction).execute()
-                        val resultAction = AsyncResultAction(action, result)
-                        store.dispatch(resultAction)
-                        
-                        val completeAction = AsyncComplete(action)
+                        if (result.isSuccess) {
+                            val resultAction = AsyncResultAction(action, result.getOrThrow())
+                            store.dispatch(resultAction)
+                        } else {
+                            val errorAction = AsyncError(action, result.exceptionOrNull()!!)
+                            store.dispatch(errorAction)
+                        }
+
+                        val completeAction = action.createCompleteAction()
                         store.dispatch(completeAction)
-                        
+
                         action
                     } else {
                         next(action)
                     }
                 })
             }
-            
+
             reduceWith { state, action ->
                 when (action) {
                     is AsyncResultAction<*> -> {
-                        if (action.result.isSuccess) {
-                            val value = action.result.getOrNull()
-                            if (value is Int) {
-                                state.copy(counter = value)
-                            } else {
-                                state
-                            }
+                        val value = action.result
+                        if (value is Int) {
+                            state.copy(counter = value)
                         } else {
                             state
                         }
+                    }
+                    is AsyncError -> {
+                        // Handle error case
+                        state
                     }
                     else -> state
                 }
             }
         }
-        
+
         dispatchAndAdvance(store, TestAsyncAction())
 
         val actions = processedActions.toList()
-        
+
         assertTrue(actions.size >= 4, "Should have processed at least 4 actions")
         assertTrue(actions.any { it is TestAsyncAction })
         assertTrue(actions.any { it is AsyncProcessing })
         assertTrue(actions.any { it is AsyncResultAction<*> })
         assertTrue(actions.any { it is AsyncComplete })
-        
+
         assertEquals(42, store.state.value.counter)
     }
-    
+
     @Test
     fun `should trigger saga-like side effects after actions`() = runTest {
         val (store, processedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 middleware({ store, next, action ->
                     val result = next(action)
-                    
+
                     if (action is IncrementAction) {
                         val message = AddMessageAction("Increment: ${action.value}")
                         store.dispatch(message)
                     }
-                    
+
                     result
                 })
             }
-            
+
             reduceWith { state, action ->
                 when (action) {
                     is IncrementAction -> state.copy(counter = state.counter + action.value)
@@ -283,14 +287,14 @@ class StoreTest {
                 }
             }
         }
-        
+
         dispatchAndAdvance(store, IncrementAction(5))
         val actions = processedActions.toList()
-        
+
         assertTrue(actions.size >= 2, "Should have processed at least 2 actions")
         assertTrue(actions.any { it is IncrementAction })
         assertTrue(actions.any { it is AddMessageAction })
-        
+
         assertEquals(5, store.state.value.counter)
         assertEquals(1, store.state.value.messages.size)
         assertEquals("Increment: 5", store.state.value.messages[0])

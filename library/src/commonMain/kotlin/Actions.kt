@@ -37,7 +37,7 @@ interface AsyncInitiatedByAction : Action {
  * @param result The result of the asynchronous operation, wrapped in a Result class
  * @param TResult The type of the result value
  */
-data class AsyncResultAction<TResult>(override val initiatedBy: Action, val result: Result<TResult>) : AsyncInitiatedByAction
+data class AsyncResultAction<TResult>(override val initiatedBy: Action, val result: TResult) : AsyncInitiatedByAction
 
 /**
  * Indicates that an asynchronous operation has started processing.
@@ -59,6 +59,12 @@ data class AsyncProcessing(override val initiatedBy: Action) : AsyncInitiatedByA
  */
 data class AsyncComplete(override val initiatedBy: Action) : AsyncInitiatedByAction
 
+data class AsyncError(override val initiatedBy: Action, val error: Throwable) : AsyncInitiatedByAction
+
+interface AsyncFlowAction : Action {
+    suspend fun <TState> execute(getState: () -> TState) : Flow<Action>
+}
+
 /**
  * Interface for actions that perform asynchronous operations.
  * 
@@ -67,7 +73,7 @@ data class AsyncComplete(override val initiatedBy: Action) : AsyncInitiatedByAct
  * 
  * @param TResponse The type of result that the async operation will produce
  */
-interface AsyncAction<TResponse:Any> : Action {
+interface AsyncAction<TResponse:Any> : AsyncFlowAction {
     /**
      * Executes the asynchronous operation.
      * 
@@ -87,13 +93,22 @@ interface AsyncAction<TResponse:Any> : Action {
      * @param getState A function that provides access to the current state
      * @return A Flow of actions representing the async operation lifecycle
      */
-    suspend fun <TState:StateModel> execute(getState: () -> TState) : Flow<Action> = flow {
-        emit(AsyncProcessing(this@AsyncAction))
+    override suspend fun <TState> execute(getState: () -> TState) : Flow<Action> = flow {
+        emit(createProcessingAction())
         val result = execute()
-        val resultAction = AsyncResultAction(this@AsyncAction, result)
-        emit(resultAction)
-        emit(AsyncComplete(this@AsyncAction))
+        if (result.isSuccess) {
+            emit(createResultAction(result.getOrThrow()))
+        }
+        else {
+            emit(createErrorAction(result.exceptionOrNull()!!))
+        }
+        emit(createCompleteAction())
     }
+
+    fun createProcessingAction() : Action = AsyncProcessing(this@AsyncAction)
+    fun createResultAction(result: TResponse) : Action = AsyncResultAction(this@AsyncAction, result)
+    fun createErrorAction(error: Throwable) : Action = AsyncError(this@AsyncAction, error)
+    fun createCompleteAction() : Action = AsyncComplete(this@AsyncAction)
 }
 
 /**
