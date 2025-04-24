@@ -23,13 +23,13 @@ class IntegrationTest {
     data class ErrorAction(val errorMessage: String = "Test error") : Action
 
     data class TestAsyncAction(val id: Int, val value: Int) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
+        override suspend fun getResult(stateAccessor: StateAccessor): Result<Int> {
             return Result.success(value * 2)
         }
     }
 
     data class FailingAsyncAction(val id: Int, val errorMessage: String) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
+        override suspend fun getResult(stateAccessor: StateAccessor): Result<Int> {
             return Result.failure(RuntimeException(errorMessage))
         }
     }

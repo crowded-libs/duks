@@ -39,9 +39,7 @@ data class AsyncActionsDispatched(val actions: List<Action>) : Action
 fun <TState:StateModel> asyncMiddleware(): Middleware<TState> = { store, next, action ->
     when (action) {
         is AsyncFlowAction -> {
-            val flow = action.execute({
-                store.state.value
-            })
+            val flow = action.executeFlow(store.stateAccessor)
             val dispatchedActions = mutableListOf<Action>()
 
             next(action)

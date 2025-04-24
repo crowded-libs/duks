@@ -17,6 +17,10 @@ import androidx.compose.runtime.remember
  */
 interface StateModel {}
 
+interface StateAccessor {
+    fun <TState:StateModel> getState(): TState
+}
+
 /**
  * Maps a specific slice of state from a [StateModel] for use in composable functions.
  *

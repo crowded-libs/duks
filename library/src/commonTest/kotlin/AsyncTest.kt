@@ -19,14 +19,14 @@ class AsyncTest {
     data class IncrementAction(val value: Int = 1) : Action
 
     data class SimpleAsyncAction(val value: Int) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
+        override suspend fun getResult(stateAccessor: StateAccessor): Result<Int> {
             delay(10)
             return Result.success(value * 2)
         }
     }
 
     data class FailingAsyncAction(val error: String) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
+        override suspend fun getResult(stateAccessor: StateAccessor): Result<Int> {
             delay(10)
             return Result.failure(RuntimeException(error))
         }

@@ -23,7 +23,7 @@ class CustomAsyncActionTest {
 
     // AsyncAction implementation with custom action creation methods
     data class CustomizedAsyncAction(val value: Int, val metadata: String) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
+        override suspend fun getResult(stateAccessor: StateAccessor): Result<Int> {
             delay(10)
             return Result.success(value * 2)
         }
@@ -43,7 +43,7 @@ class CustomAsyncActionTest {
 
     // AsyncAction implementation with a specific result type for type safety
     data class TypedResultAsyncAction<T : Any>(val value: T) : AsyncAction<T> {
-        override suspend fun execute(): Result<T> {
+        override suspend fun getResult(stateAccessor: StateAccessor): Result<T> {
             delay(10)
             return Result.success(value)
         }
@@ -51,7 +51,7 @@ class CustomAsyncActionTest {
 
     // AsyncAction implementation with custom error handling
     data class CustomErrorHandlingAction(val shouldFail: Boolean, val errorMessage: String) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
+        override suspend fun getResult(stateAccessor: StateAccessor): Result<Int> {
             delay(10)
             return if (shouldFail) {
                 Result.failure(RuntimeException(errorMessage))

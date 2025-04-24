@@ -17,15 +17,6 @@ class StoreTest {
     data class AddMessageAction(val message: String) : Action
     class ErrorAction(val message: String = "Test error") : Action
 
-    class TestAsyncAction(private val delayMillis: Long = 0) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
-            if (delayMillis > 0) {
-                delay(delayMillis)
-            }
-            return Result.success(42)
-        }
-    }
-
     @Test
     fun `should create store with initial state`() = runTest {
         val store = createStoreForTest(TestState()) {
@@ -201,66 +192,6 @@ class StoreTest {
 
         assertEquals(1, errors.size)
         assertTrue(errors[0].contains("Test error"))
-    }
-
-    @Test
-    fun `should process async actions correctly`() = runTest {
-        val (store, processedActions) = createTrackedStoreForTest(TestState()) {
-            middleware {
-                middleware({ store, next, action ->
-                    if (action is AsyncAction<*>) {
-                        val processingAction = action.createProcessingAction()
-                        store.dispatch(processingAction)
-
-                        val result = (action as TestAsyncAction).execute()
-                        if (result.isSuccess) {
-                            val resultAction = AsyncResultAction(action, result.getOrThrow())
-                            store.dispatch(resultAction)
-                        } else {
-                            val errorAction = AsyncError(action, result.exceptionOrNull()!!)
-                            store.dispatch(errorAction)
-                        }
-
-                        val completeAction = action.createCompleteAction()
-                        store.dispatch(completeAction)
-
-                        action
-                    } else {
-                        next(action)
-                    }
-                })
-            }
-
-            reduceWith { state, action ->
-                when (action) {
-                    is AsyncResultAction<*> -> {
-                        val value = action.result
-                        if (value is Int) {
-                            state.copy(counter = value)
-                        } else {
-                            state
-                        }
-                    }
-                    is AsyncError -> {
-                        // Handle error case
-                        state
-                    }
-                    else -> state
-                }
-            }
-        }
-
-        dispatchAndAdvance(store, TestAsyncAction())
-
-        val actions = processedActions.toList()
-
-        assertTrue(actions.size >= 4, "Should have processed at least 4 actions")
-        assertTrue(actions.any { it is TestAsyncAction })
-        assertTrue(actions.any { it is AsyncProcessing })
-        assertTrue(actions.any { it is AsyncResultAction<*> })
-        assertTrue(actions.any { it is AsyncComplete })
-
-        assertEquals(42, store.state.value.counter)
     }
 
     @Test

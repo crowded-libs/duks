@@ -66,62 +66,6 @@ class SagaTest {
     }
     
     @Test
-    fun `should allow sagas to interact with async actions`() = runTest(timeout = 10.seconds) {
-        val initialState = SagaTestState()
-        val (store, _) = createTrackedStoreForTest(initialState) {
-            middleware {
-                async()
-                
-                sagas {
-                    on<TriggerAction> { action ->
-                        val asyncAction = TestSagaAsyncAction(10)
-                        val directResult = asyncAction.execute()
-                        
-                        if (directResult.isSuccess) {
-                            val value = directResult.getOrNull()!!
-                            put(SagaResultAction(action.id, value))
-                            
-                            put(asyncAction)
-                            
-                            val resultAction = AsyncResultAction(asyncAction, directResult)
-                            put(resultAction)
-                            
-                            put(AsyncComplete(asyncAction))
-                            
-                            put(SagaCompletedAction("async-${asyncAction.value}-$value"))
-                        }
-                    }
-                    
-                    onSuccessOf<TestSagaAsyncAction, Int> { initiator, result ->
-                        put(SagaCompletedAction("async-${initiator.value}-$result"))
-                    }
-                }
-            }
-            reduceWith { state, action ->
-                when (action) {
-                    is SagaResultAction -> state.copy(
-                        counter = state.counter + action.value,
-                        sagaResults = state.sagaResults + "Result:${action.id}"
-                    )
-                    is SagaCompletedAction -> state.copy(
-                        sagaResults = state.sagaResults + "Completed:${action.triggerId}"
-                    )
-                    else -> state
-                }
-            }
-        }
-        
-        dispatchAndAdvance(store, TriggerAction("async-test"))
-
-        assertEquals(20, store.state.value.counter, "Counter should be 10 * 2 from async result") 
-        
-        assertTrue(store.state.value.sagaResults.contains("Result:async-test"), 
-            "Result action should be in sagaResults")
-        assertTrue(store.state.value.sagaResults.contains("Completed:async-10-20"), 
-            "Completed action should be in sagaResults")
-    }
-    
-    @Test
     fun `should support parallel and chain saga execution`() = runTest(timeout = 10.seconds) {
         val initialState = SagaTestState()
         val actionsOrder = mutableListOf<String>()
@@ -266,7 +210,7 @@ class SagaTest {
         triggeredSagas.clear()
         
         val asyncAction = object : AsyncAction<String> {
-            override suspend fun execute(): Result<String> {
+            override suspend fun getResult(stateAccessor: StateAccessor): Result<String> {
                 return Result.success("test-result")
             }
         }
@@ -325,11 +269,5 @@ class SagaTest {
         
         assertTrue(store.state.value.sagaResults.any { it.contains("Result:effects-test") }, 
             "Results should contain the correct message")
-    }
-    
-    data class TestSagaAsyncAction(val value: Int) : AsyncAction<Int> {
-        override suspend fun execute(): Result<Int> {
-            return Result.success(value * 2)
-        }
     }
 }

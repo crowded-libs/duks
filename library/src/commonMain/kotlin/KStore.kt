@@ -74,6 +74,14 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
         }
     }
 
+    internal val stateAccessor: StateAccessor = object : StateAccessor {
+        override fun <TState : StateModel> getState(): TState {
+            @Suppress("UNCHECKED_CAST")
+            return _state.value as TState
+        }
+
+    }
+
     /**
      * Internally handles calling the reducer after middleware processing.
      *

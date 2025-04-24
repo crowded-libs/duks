@@ -245,15 +245,15 @@ private class SagaEffectContextImpl(private val store: KStore<*>,
     override suspend fun delay(timeMillis: Long) {
         kotlinx.coroutines.delay(timeMillis)
     }
-    
+
+
     override suspend fun <T : Any> execute(action: AsyncAction<T>): Result<T> {
 
         try {
-            val result = action.execute()
+            val result = action.getResult(store.stateAccessor)
             
             dispatch(action)
             
-            //delay(50)
             yield()
             
             if (result.isSuccess) {
@@ -261,7 +261,6 @@ private class SagaEffectContextImpl(private val store: KStore<*>,
                 
                 dispatch(resultAction)
                 
-                //delay(50)
                 yield()
                 
                 dispatch(AsyncComplete(action))

@@ -62,7 +62,7 @@ data class AsyncComplete(override val initiatedBy: Action) : AsyncInitiatedByAct
 data class AsyncError(override val initiatedBy: Action, val error: Throwable) : AsyncInitiatedByAction
 
 interface AsyncFlowAction : Action {
-    suspend fun <TState> execute(getState: () -> TState) : Flow<Action>
+    suspend fun executeFlow(stateAccessor: StateAccessor) : Flow<Action>
 }
 
 /**
@@ -82,7 +82,7 @@ interface AsyncAction<TResponse:Any> : AsyncFlowAction {
      * 
      * @return A Result object containing either the successful response or a failure exception
      */
-    suspend fun execute() : Result<TResponse>
+    suspend fun getResult(stateAccessor: StateAccessor) : Result<TResponse>
     
     /**
      * Executes the asynchronous operation and emits lifecycle actions for the async middleware.
@@ -93,9 +93,9 @@ interface AsyncAction<TResponse:Any> : AsyncFlowAction {
      * @param getState A function that provides access to the current state
      * @return A Flow of actions representing the async operation lifecycle
      */
-    override suspend fun <TState> execute(getState: () -> TState) : Flow<Action> = flow {
+    override suspend fun executeFlow(stateAccessor: StateAccessor) : Flow<Action> = flow {
         emit(createProcessingAction())
-        val result = execute()
+        val result = getResult(stateAccessor)
         if (result.isSuccess) {
             emit(createResultAction(result.getOrThrow()))
         }
