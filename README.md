@@ -570,6 +570,256 @@ middleware {
 }
 ```
 
+## Async Actions
+
+Duks provides a powerful system for handling asynchronous operations through the `AsyncAction` interface. This section covers the default behavior and various customization options.
+
+### Default Async Actions
+
+When you implement the `AsyncAction` interface, the async middleware automatically handles the lifecycle of your asynchronous operations by dispatching a series of actions:
+
+```kotlin
+// 1. Define an async action
+data class FetchUserData(val userId: String) : AsyncAction<UserData> {
+    override suspend fun getResult(stateAccessor: StateAccessor): Result<UserData> {
+        return try {
+            // Perform async operation (API call, database query, etc.)
+            val userData = userRepository.fetchUserData(userId)
+            Result.success(userData)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
+
+// 2. Add async middleware to your store
+val store = createStore(AppState()) {
+    middleware {
+        async()  // This enables async action processing
+    }
+
+    reduceWith { state, action ->
+        when (action) {
+            // 3. Handle the lifecycle actions
+            is AsyncProcessing -> {
+                // Action dispatched when async operation starts
+                if (action.initiatedBy is FetchUserData) {
+                    state.copy(isLoading = true)
+                } else state
+            }
+            is AsyncResultAction<*> -> {
+                // Action dispatched when async operation succeeds
+                if (action.initiatedBy is FetchUserData && action.result is UserData) {
+                    state.copy(
+                        userData = action.result as UserData,
+                        isLoading = false
+                    )
+                } else state
+            }
+            is AsyncError -> {
+                // Action dispatched when async operation fails
+                if (action.initiatedBy is FetchUserData) {
+                    state.copy(
+                        error = action.error.message,
+                        isLoading = false
+                    )
+                } else state
+            }
+            is AsyncComplete -> {
+                // Action dispatched when async operation completes (success or failure)
+                state
+            }
+            else -> state
+        }
+    }
+}
+
+// 4. Dispatch the async action
+store.dispatch(FetchUserData("user-123"))
+```
+
+When you dispatch an `AsyncAction`, the async middleware will automatically dispatch these actions in sequence:
+
+1. `AsyncProcessing(initiatedBy: YourAction)` - Indicates the async operation has started
+2. `AsyncResultAction(initiatedBy: YourAction, result: T)` - Contains the successful result (if successful)
+   OR
+   `AsyncError(initiatedBy: YourAction, error: Throwable)` - Contains the error (if failed)
+3. `AsyncComplete(initiatedBy: YourAction)` - Indicates the async operation has completed
+
+### Custom Async Flow Actions
+
+You can create custom async actions that publish a stream of actions by implementing the `AsyncFlowAction` interface and overriding the `executeFlow` method:
+
+```kotlin
+data class StreamingAsyncAction(val count: Int) : AsyncFlowAction {
+    override suspend fun executeFlow(stateAccessor: StateAccessor): Flow<Action> = flow {
+        // Emit a starting action
+        emit(AsyncProcessing(this@StreamingAsyncAction))
+
+        // Emit progress updates
+        for (i in 1..count) {
+            delay(100)
+            emit(ProgressUpdateAction(i, count))
+        }
+
+        // Emit a result action
+        emit(AsyncResultAction(this@StreamingAsyncAction, "Completed $count updates"))
+
+        // Emit a completion action
+        emit(AsyncComplete(this@StreamingAsyncAction))
+    }
+}
+
+// Progress update action
+data class ProgressUpdateAction(val current: Int, val total: Int) : Action
+
+// Handle in reducer
+reduceWith { state, action ->
+    when (action) {
+        is ProgressUpdateAction -> {
+            state.copy(progress = action.current.toFloat() / action.total)
+        }
+        // Handle other actions...
+        else -> state
+    }
+}
+```
+
+This approach gives you complete control over the sequence and timing of actions emitted during an asynchronous operation.
+
+### Custom Async Action Interface
+
+You can create a custom interface that extends `AsyncAction` to provide more specific types for the async lifecycle actions:
+
+```kotlin
+// Define custom interface with specific types
+interface UserAsyncAction<T : Any> : AsyncAction<T> {
+    // Custom action types with more specific information
+    data class Starting(val userId: String, override val initiatedBy: Action) : AsyncInitiatedByAction
+    data class Success<T : Any>(val userId: String, val data: T, override val initiatedBy: Action) : AsyncInitiatedByAction
+    data class Failed(val userId: String, val error: Throwable, override val initiatedBy: Action) : AsyncInitiatedByAction
+    data class Completed(val userId: String, override val initiatedBy: Action) : AsyncInitiatedByAction
+
+    // Get the user ID associated with this action
+    val userId: String
+
+    // Override the create methods to return our custom action types
+    override fun createProcessingAction(): Action = Starting(userId, this)
+    override fun createResultAction(result: T): Action = Success(userId, result, this)
+    override fun createErrorAction(error: Throwable): Action = Failed(userId, error, this)
+    override fun createCompleteAction(): Action = Completed(userId, this)
+}
+
+// Implement the custom interface
+data class FetchUserProfile(override val userId: String) : UserAsyncAction<UserProfile> {
+    override suspend fun getResult(stateAccessor: StateAccessor): Result<UserProfile> {
+        return try {
+            val profile = userRepository.fetchProfile(userId)
+            Result.success(profile)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
+
+// Handle the custom action types in the reducer
+reduceWith { state, action ->
+    when (action) {
+        is UserAsyncAction.Starting -> {
+            state.copy(isLoadingUser = true, userId = action.userId)
+        }
+        is UserAsyncAction.Success<*> -> {
+            if (action.data is UserProfile) {
+                state.copy(
+                    isLoadingUser = false,
+                    userProfile = action.data,
+                    userId = action.userId
+                )
+            } else state
+        }
+        is UserAsyncAction.Failed -> {
+            state.copy(
+                isLoadingUser = false,
+                userError = action.error.message,
+                userId = action.userId
+            )
+        }
+        is UserAsyncAction.Completed -> {
+            // Handle completion if needed
+            state
+        }
+        else -> state
+    }
+}
+```
+
+This approach provides type safety and makes it easier to handle specific types of async actions in your reducers.
+
+### Overriding Create Methods
+
+You can override the create methods within an action to customize the actions dispatched during the async lifecycle:
+
+```kotlin
+data class CustomizedAsyncAction(val value: Int, val metadata: String) : AsyncAction<Int> {
+    override suspend fun getResult(stateAccessor: StateAccessor): Result<Int> {
+        delay(10)
+        return Result.success(value * 2)
+    }
+
+    // Override the create methods to return custom actions with additional metadata
+    override fun createProcessingAction(): Action = 
+        CustomProcessingAction(this, metadata)
+
+    override fun createResultAction(result: Int): Action = 
+        CustomResultAction(this, result, metadata)
+
+    override fun createErrorAction(error: Throwable): Action = 
+        CustomErrorAction(this, error, metadata)
+
+    override fun createCompleteAction(): Action = 
+        CustomCompleteAction(this, metadata)
+}
+
+// Custom action types
+data class CustomProcessingAction(override val initiatedBy: Action, val metadata: String) : AsyncInitiatedByAction
+data class CustomResultAction<T>(override val initiatedBy: Action, val result: T, val metadata: String) : AsyncInitiatedByAction
+data class CustomErrorAction(override val initiatedBy: Action, val error: Throwable, val metadata: String) : AsyncInitiatedByAction
+data class CustomCompleteAction(override val initiatedBy: Action, val metadata: String) : AsyncInitiatedByAction
+
+// Handle the custom actions in the reducer
+reduceWith { state, action ->
+    when (action) {
+        is CustomProcessingAction -> {
+            state.copy(isLoading = true, metadata = action.metadata)
+        }
+        is CustomResultAction<*> -> {
+            val result = action.result
+            if (result is Int) {
+                state.copy(
+                    value = result,
+                    isLoading = false,
+                    metadata = action.metadata
+                )
+            } else state
+        }
+        is CustomErrorAction -> {
+            state.copy(
+                error = action.error.message,
+                isLoading = false,
+                metadata = action.metadata
+            )
+        }
+        is CustomCompleteAction -> {
+            // Handle completion if needed
+            state
+        }
+        else -> state
+    }
+}
+```
+
+This approach allows you to include additional context or metadata with your async actions, making them more informative and easier to track.
+
 ## License
 
 This project is licensed under the Apache License, Version 2.0 - see the [LICENSE](LICENSE) file for details.
