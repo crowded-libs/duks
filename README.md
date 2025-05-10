@@ -130,7 +130,7 @@ Duks integrates smoothly with Jetpack Compose. The store's state is exposed as a
 @Composable
 fun CounterScreen(store: KStore<CounterState>) {
     // Access store state in a Compose-friendly way
-    val state by remember { store.state }
+    val state by store::getState
 
     Column(modifier = Modifier.padding(16.dp)) {
         Text(text = "Count: ${state.count}")
@@ -235,8 +235,8 @@ fun TodoApp() {
 
 @Composable
 fun TodoScreen(store: KStore<TodoState>) {
-    // Remember the state from the store
-    val state by remember { store.state }
+    // Access the state from the store
+    val state by store::getState
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Input field and add button
@@ -316,7 +316,7 @@ This example demonstrates how to:
 2. Create a reducer to handle state transitions
 3. Set up the store with middleware
 4. Use the store within Compose components
-5. Access and observe the state using `remember { store.state }`
+5. Access and observe the state using `store::getState` with the `by` keyword
 6. Dispatch actions in response to user interactions
 
 ### Real World Example
@@ -376,11 +376,11 @@ data class CounterScreenProps(
     val onSetCounter: (Int) -> Unit
 )
 
-// 7. Create Screen function that maps state to props using mapToProps extension
+// 7. Create Screen function that maps state to props using mapToPropsAsState extension
 @Composable
 fun CounterScreen() {
-    // Use mapToProps to extract and memoize only the needed slice of state
-    val props = appState.mapToProps { 
+    // Use mapToPropsAsState to extract and memoize only the needed slice of state
+    val props by appState.mapToPropsAsState { 
         CounterScreenProps(
             counter = counter,
             onIncrement = { dispatch(CounterAction.Increment) },
@@ -476,8 +476,8 @@ This real-world example demonstrates several important patterns:
    - Clear separation between UI and state management makes the codebase easier to maintain
    - Changes to state management don't require changes to UI components and vice versa
 
-5. **Performance with mapToProps**:
-   - The `mapToProps` extension method memoizes the selected slice of state
+5. **Performance with mapToPropsAsState**:
+   - The `mapToPropsAsState` extension method uses collectAsState for the selected slice of state
    - Only triggers recomposition when the selected data actually changes
    - Prevents unnecessary recompositions when unrelated parts of the state change
    - Automatically handles the extraction of only the needed properties from the state
