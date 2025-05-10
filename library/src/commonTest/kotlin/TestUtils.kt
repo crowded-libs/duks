@@ -9,7 +9,7 @@ fun <TState : StateModel> TestScope.createStoreForTest(
 ): KStore<TState> {
     return createStore(initialState) {
         val testScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
-        scope(testScope, testScope)
+        scope(testScope)
         
         block()
     }

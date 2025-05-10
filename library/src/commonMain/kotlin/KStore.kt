@@ -1,9 +1,10 @@
 package duks
 
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Represents a reducer function in the Duks state management system.
@@ -37,10 +38,9 @@ typealias Reducer<TState> = (TState, Action) -> TState
 class KStore<TState:StateModel> internal constructor(initialState: TState,
                                                      private val reducer: Reducer<TState>,
                                                      private val middleware: Middleware<TState>,
-                                                     private val uiScope: CoroutineScope,
                                                      internal val ioScope: CoroutineScope) {
     
-    private val _state = mutableStateOf(initialState)
+    private val _state = MutableStateFlow(initialState)
     private val _dispatchFlow = MutableSharedFlow<Action>(extraBufferCapacity = 100)
 
     init {
@@ -52,13 +52,13 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
     }
 
     /**
-     * The current state of the store, exposed as a Compose State object.
+     * The current state of the store, exposed as a StateFlow.
      *
-     * This property allows the store's state to be observed by Compose UI components,
-     * which will automatically recompose when the state changes.
+     * This property allows the store's state to be observed by UI components,
+     * which will automatically update when the state changes. In UI frameworks
+     * like Compose, this can be collected to trigger recomposition.
      */
-    val state: State<TState>
-        get() = _state
+    val state: StateFlow<TState> = _state.asStateFlow()
 
     /**
      * Dispatches an action to the store.
@@ -130,7 +130,6 @@ class StoreBuilder<TState:StateModel> {
     private var initialState: TState? = null
     private val middlewareBuilder = MiddlewareBuilder<TState>()
     private var reducer: Reducer<TState> = { state, action -> state }
-    private var uiScope: CoroutineScope = CoroutineScope(Dispatchers.Main + Job())
     private var ioScope: CoroutineScope = CoroutineScope(Dispatchers.IO + Job())
 
     /**
@@ -166,8 +165,7 @@ class StoreBuilder<TState:StateModel> {
      * @param uiScope The coroutine scope for UI updates
      * @param ioScope The coroutine scope for IO operations and middleware
      */
-    fun scope(uiScope: CoroutineScope, ioScope: CoroutineScope) {
-        this.uiScope = uiScope
+    fun scope(ioScope: CoroutineScope) {
         this.ioScope = ioScope
     }
 
@@ -181,7 +179,7 @@ class StoreBuilder<TState:StateModel> {
         if (initialState == null) {
             throw IllegalStateException("Initial state must be set")
         }
-        return KStore(initialState!!, reducer, middlewareBuilder.compose(), uiScope, ioScope)
+        return KStore(initialState!!, reducer, middlewareBuilder.compose(), ioScope)
     }
 }
 

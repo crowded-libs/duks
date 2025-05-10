@@ -3,7 +3,9 @@ package duks
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisallowComposableCalls
 import androidx.compose.runtime.State
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 
 /**
  * Base interface for state models in the Duks state management system.
@@ -24,18 +26,17 @@ interface StateAccessor {
 /**
  * Maps a specific slice of state from a [StateModel] for use in composable functions.
  *
- * This function allows extracting and memoizing a portion of the state to prevent
- * unnecessary recompositions when other parts of the state change. It uses [remember]
- * to memoize the selected slice or props of state and only triggers recomposition when the
- * selected data actually changes.
+ * This function allows extracting and transforming a portion of the state from a StateFlow
+ * to prevent unnecessary recompositions when other parts of the state change. It uses
+ * `map` to transform the StateFlow and `collectAsState` to convert it to a State object,
+ * with an initial value taken from the current state.
  *
  * @param selector A function that extracts the desired slice of state from the current state.
  *                 This function cannot contain Composable calls as indicated by [DisallowComposableCalls].
- * @return The selected slice of state, memoized based on both the full state and the selected slice.
+ * @return A State object containing the selected slice of state, which will be updated when the source StateFlow changes.
  */
 @Composable
-inline fun <TState:StateModel, Props> State<TState>.mapToProps(crossinline selector: @DisallowComposableCalls TState.() -> Props) : Props {
+inline fun <TState:StateModel, TProps> StateFlow<TState>.mapToPropsAsState(crossinline selector: @DisallowComposableCalls TState.() -> TProps) : State<TProps> {
     val slice = this.value.selector()
-    val result = remember(this.value, slice) { slice }
-    return result
+    return this.map { item -> item.selector() }.collectAsState(slice)
 }
