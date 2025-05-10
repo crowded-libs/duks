@@ -23,7 +23,14 @@ kotlin {
     iosX64()
     iosArm64()
     iosSimulatorArm64()
+    watchosArm32()
+    watchosArm64()
+    watchosSimulatorArm64()
+    tvosArm64()
+    tvosSimulatorArm64()
     linuxX64()
+    linuxArm64()
+    mingwX64()
 
     sourceSets {
         all {
