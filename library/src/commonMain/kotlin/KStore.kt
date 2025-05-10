@@ -1,10 +1,11 @@
 package duks
 
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Represents a reducer function in the Duks state management system.
@@ -32,7 +33,6 @@ typealias Reducer<TState> = (TState, Action) -> TState
  * @property initialState The initial state of the store
  * @property reducer The reducer function that processes actions and updates state
  * @property middleware The composed middleware chain to process actions
- * @property uiScope The coroutine scope used for UI updates
  * @property ioScope The coroutine scope used for IO operations and middleware processing
  */
 class KStore<TState:StateModel> internal constructor(initialState: TState,
@@ -41,15 +41,7 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
                                                      internal val ioScope: CoroutineScope) {
     
     private val _state = MutableStateFlow(initialState)
-    private val _dispatchFlow = MutableSharedFlow<Action>(extraBufferCapacity = 100)
-
-    init {
-        ioScope.launch {
-            _dispatchFlow.collect { action ->
-                middleware(this@KStore, { a -> this@KStore.applyReducer(a) }, action)
-            }
-        }
-    }
+    private val _stateMutex = Mutex()
 
     /**
      * The current state of the store, exposed as a StateFlow.
@@ -70,7 +62,11 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      */
     fun dispatch(action: Action) {
         ioScope.launch {
-            _dispatchFlow.tryEmit(action)
+            middleware(this@KStore, { a ->
+                _stateMutex.withLock {
+                    applyReducer(a)
+                }
+            }, action)
         }
     }
 
@@ -92,11 +88,7 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      * @return The original action (for middleware chaining)
      */
     private fun applyReducer(action: Action) : Action {
-        val originalValue = _state.value
-        val newValue = reducer(originalValue, action)
-        if(newValue != originalValue) {
-            _state.value = newValue
-        }
+        _state.value = reducer(_state.value, action)
         return action
     }
 }
@@ -162,7 +154,6 @@ class StoreBuilder<TState:StateModel> {
     /**
      * Sets custom coroutine scopes for UI and IO operations.
      *
-     * @param uiScope The coroutine scope for UI updates
      * @param ioScope The coroutine scope for IO operations and middleware
      */
     fun scope(ioScope: CoroutineScope) {
