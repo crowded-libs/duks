@@ -122,7 +122,7 @@ class StoreBuilder<TState:StateModel> {
     private var initialState: TState? = null
     private val middlewareBuilder = MiddlewareBuilder<TState>()
     private var reducer: Reducer<TState> = { state, action -> state }
-    private var ioScope: CoroutineScope = CoroutineScope(Dispatchers.IO + Job())
+    private var ioScope: CoroutineScope = CoroutineScope(backgroundDispatcher() + Job())
 
     /**
      * Sets the initial state for the store.
