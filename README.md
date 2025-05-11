@@ -132,7 +132,7 @@ Duks integrates smoothly with Jetpack Compose. The store's state is exposed as a
 @Composable
 fun CounterScreen(store: KStore<CounterState>) {
     // Access store state in a Compose-friendly way
-    val state by store::getState
+    val state by store.state.collectAsState()
 
     Column(modifier = Modifier.padding(16.dp)) {
         Text(text = "Count: ${state.count}")
@@ -238,7 +238,7 @@ fun TodoApp() {
 @Composable
 fun TodoScreen(store: KStore<TodoState>) {
     // Access the state from the store
-    val state by store::getState
+    val state by store.state.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Input field and add button
@@ -318,7 +318,7 @@ This example demonstrates how to:
 2. Create a reducer to handle state transitions
 3. Set up the store with middleware
 4. Use the store within Compose components
-5. Access and observe the state using `store::getState` with the `by` keyword
+5. Access and observe the state using `store.state.collectAsState` with the `by` keyword
 6. Dispatch actions in response to user interactions
 
 ### Real World Example
