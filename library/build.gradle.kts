@@ -86,11 +86,7 @@ val dokkaHtmlJar by tasks.registering(Jar::class) {
 mavenPublishing {
     publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
 
-    // Only sign publications when not publishing to mavenLocal
-    if (rootProject.hasProperty("signing.keyId") && rootProject.hasProperty("signing.password") &&
-        rootProject.hasProperty("signing.secretKeyRingFile")) {
-        signAllPublications()
-    }
+    signAllPublications()
 
     coordinates(group.toString(), "duks", version.toString())
 
