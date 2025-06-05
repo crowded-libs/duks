@@ -15,6 +15,28 @@ package duks
 typealias Middleware<TState> = suspend (store: KStore<TState>, next: suspend (Action) -> Action, action: Action) -> Action
 
 /**
+ * Interface for middleware that needs to be notified of store lifecycle events.
+ *
+ * Middleware can implement this interface to receive callbacks when the store
+ * is created, allowing for initialization or setup operations that require
+ * access to the store instance.
+ *
+ * @param TState The type of state model used in the store
+ */
+interface StoreLifecycleAware<TState : StateModel> {
+    /**
+     * Called when the store has been created and is ready for use.
+     *
+     * This method is invoked after the store is fully constructed but before
+     * any actions are dispatched, allowing middleware to perform initialization
+     * that requires access to the store instance.
+     *
+     * @param store The newly created store instance
+     */
+    suspend fun onStoreCreated(store: KStore<TState>)
+}
+
+/**
  * Action dispatched after a batch of async actions have been processed.
  *
  * This action is emitted by the asyncMiddleware after all the actions from an

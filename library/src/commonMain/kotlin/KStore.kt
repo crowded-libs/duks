@@ -38,10 +38,20 @@ typealias Reducer<TState> = (TState, Action) -> TState
 class KStore<TState:StateModel> internal constructor(initialState: TState,
                                                      private val reducer: Reducer<TState>,
                                                      private val middleware: Middleware<TState>,
-                                                     internal val ioScope: CoroutineScope) {
+                                                     internal val ioScope: CoroutineScope,
+                                                     lifecycleAwareMiddleware: List<StoreLifecycleAware<TState>> = emptyList()) {
     
     private val _state = MutableStateFlow(initialState)
     private val _stateMutex = Mutex()
+
+    init {
+        // Notify lifecycle-aware middleware that the store has been created
+        ioScope.launch {
+            lifecycleAwareMiddleware.forEach { middleware ->
+                middleware.onStoreCreated(this@KStore)
+            }
+        }
+    }
 
     /**
      * The current state of the store, exposed as a StateFlow.
@@ -170,7 +180,7 @@ class StoreBuilder<TState:StateModel> {
         if (initialState == null) {
             throw IllegalStateException("Initial state must be set")
         }
-        return KStore(initialState!!, reducer, middlewareBuilder.compose(), ioScope)
+        return KStore(initialState!!, reducer, middlewareBuilder.compose(), ioScope, middlewareBuilder.lifecycleAwareMiddleware)
     }
 }
 
@@ -184,6 +194,7 @@ class StoreBuilder<TState:StateModel> {
  */
 class MiddlewareBuilder<TState:StateModel> {
     private val middleware = mutableListOf<Middleware<TState>>()
+    internal val lifecycleAwareMiddleware = mutableListOf<StoreLifecycleAware<TState>>()
 
     /**
      * Adds logging middleware to the chain.
@@ -233,6 +244,15 @@ class MiddlewareBuilder<TState:StateModel> {
      */
     fun middleware(block: Middleware<TState>) {
         middleware.add(block)
+    }
+
+    /**
+     * Adds lifecycle-aware middleware to the chain.
+     *
+     * @param lifecycleAware The lifecycle-aware middleware instance
+     */
+    fun lifecycleAware(lifecycleAware: StoreLifecycleAware<TState>) {
+        lifecycleAwareMiddleware.add(lifecycleAware)
     }
 
     /**
