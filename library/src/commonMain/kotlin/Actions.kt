@@ -18,6 +18,17 @@ import kotlinx.datetime.plus
 interface Action
 
 /**
+ * Action to restore state from persistence through normal middleware flow.
+ * This maintains unidirectional data flow and makes state restoration traceable.
+ * 
+ * @param state The state to restore
+ * @param TState The type of state being restored
+ */
+data class RestoreStateAction<TState : StateModel>(
+    val state: TState
+) : Action
+
+/**
  * Interface for actions that are triggered as part of an asynchronous operation.
  * 
  * These actions are associated with an original initiating action that started

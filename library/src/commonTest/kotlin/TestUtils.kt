@@ -1,6 +1,5 @@
 package duks
 
-import kotlinx.coroutines.*
 import kotlinx.coroutines.test.*
 
 fun <TState : StateModel> TestScope.createStoreForTest(
@@ -8,8 +7,8 @@ fun <TState : StateModel> TestScope.createStoreForTest(
     block: StoreBuilder<TState>.() -> Unit
 ): KStore<TState> {
     return createStore(initialState) {
-        val testScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
-        scope(testScope)
+        // Use the test scope to ensure coroutines are synchronized with tests
+        scope(this@createStoreForTest)
         
         block()
     }

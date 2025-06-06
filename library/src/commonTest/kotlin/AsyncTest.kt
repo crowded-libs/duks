@@ -2,6 +2,7 @@ package duks
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -152,14 +153,13 @@ class AsyncTest {
         }
 
         store.dispatch(IncrementAction(5))
+        store.state.first { it.counter == 5 }
         assertEquals(5, store.state.value.counter, "Regular action should update counter")
 
         dispatchAndAdvance(store, SimpleAsyncAction(10))
 
         // Wait for counter to reach expected value
-        while(store.state.value.counter != 25) {
-            delay(200)
-        }
+        store.state.first { it.counter == 25 }
 
         // Wait for AsyncComplete action to be dispatched
         var completeActionFound = false
@@ -168,7 +168,6 @@ class AsyncTest {
             completeActionFound = dispatchedActions.any { it is AsyncComplete && it.initiatedBy is SimpleAsyncAction }
         }
 
-        advanceUntilIdle()
         val actions = dispatchedActions.toList()
         assertEquals(25, store.state.value.counter,
             "Async action should update counter with value*2 added to current count")

@@ -1,7 +1,7 @@
 package duks
 
 import kotlin.test.*
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.*
 import kotlin.time.Duration.Companion.seconds
 
 class SagaTest {
@@ -12,10 +12,26 @@ class SagaTest {
         val parallelResults: MutableList<Int> = mutableListOf()
     ) : StateModel
     
+    // Test saga states
+    data class CounterSagaState(
+        val triggerId: String,
+        val currentValue: Int = 0,
+        val operations: List<String> = emptyList()
+    )
+    
+    data class MultiStepSagaState(
+        val startAction: String,
+        val completedSteps: List<Int> = emptyList(),
+        val isParallel: Boolean = false
+    )
+    
+    // Test actions
     data class TriggerAction(val id: String) : Action
     data class SagaResultAction(val id: String, val value: Int) : Action
     data class MultiStepAction(val step: Int) : Action
     data class SagaCompletedAction(val triggerId: String) : Action
+    data class IncrementSagaCounter(val sagaId: String, val amount: Int) : Action
+    data class CompleteSaga(val sagaId: String) : Action
     
     @Test
     fun `should execute sagas in response to actions`() = runTest(timeout = 10.seconds) {
@@ -30,12 +46,50 @@ class SagaTest {
                 }
                 
                 sagas {
-                    on<TriggerAction> { action ->
-                        put(SagaResultAction(action.id, 42))
-                        put(SagaCompletedAction(action.id))
+                    saga<CounterSagaState>(
+                        name = "CounterSaga",
+                        initialState = { CounterSagaState("") }
+                    ) {
+                        startsOn<TriggerAction> { action ->
+                            SagaTransition.Continue(
+                                CounterSagaState(
+                                    triggerId = action.id,
+                                    currentValue = 0,
+                                    operations = listOf("started")
+                                ),
+                                effects = listOf(
+                                    SagaEffect.Dispatch(SagaResultAction(action.id, 42))
+                                )
+                            )
+                        }
+                        
+                        on<SagaResultAction>(
+                            condition = { action, state -> action.id == state.triggerId }
+                        ) { action, state ->
+                            SagaTransition.Continue(
+                                state.copy(
+                                    currentValue = state.currentValue + action.value,
+                                    operations = state.operations + "added:${action.value}"
+                                ),
+                                effects = listOf(
+                                    SagaEffect.Dispatch(SagaCompletedAction(state.triggerId))
+                                )
+                            )
+                        }
+                        
+                        on<SagaCompletedAction>(
+                            condition = { action, state -> action.triggerId == state.triggerId }
+                        ) { action, state ->
+                            SagaTransition.Complete(
+                                effects = listOf(
+                                    SagaEffect.Dispatch(AddMessageAction("Saga completed for ${state.triggerId}"))
+                                )
+                            )
+                        }
                     }
                 }
             }
+            
             reduceWith { state, action ->
                 when (action) {
                     is SagaResultAction -> state.copy(
@@ -44,6 +98,9 @@ class SagaTest {
                     )
                     is SagaCompletedAction -> state.copy(
                         sagaResults = state.sagaResults + "Completed:${action.triggerId}"
+                    )
+                    is AddMessageAction -> state.copy(
+                        sagaResults = state.sagaResults + action.message
                     )
                     else -> state
                 }
@@ -60,214 +117,273 @@ class SagaTest {
         assertEquals(42, counter, "Saga should update counter state")
         assertTrue(sagaResults.isNotEmpty(), "Should have saga results")
         
-        assertEquals(2, sagaResults.size, "Saga should add two results")
-        assertEquals("Result:test1", sagaResults[0], "First result should be from SagaResultAction")
-        assertEquals("Completed:test1", sagaResults[1], "Second result should be from completed action")
+        assertTrue(sagaResults.contains("Result:test1"), "Should have result action")
+        assertTrue(sagaResults.contains("Completed:test1"), "Should have completed action")
     }
     
     @Test
-    fun `should support parallel and chain saga execution`() = runTest(timeout = 10.seconds) {
-        val initialState = SagaTestState()
-        val actionsOrder = mutableListOf<String>()
-        val (store, dispatchedActions) = createTrackedStoreForTest(initialState) {
-            middleware {
-                sagas {
-                    on<TriggerAction> { action ->
-                        when (action.id) {
-                            "parallel" -> {
-                                parallel(
-                                    MultiStepAction(1),
-                                    MultiStepAction(2),
-                                    MultiStepAction(3)
-                                )
-                            }
-                            "chain" -> {
-                                chain(
-                                    MultiStepAction(1),
-                                    MultiStepAction(2),
-                                    MultiStepAction(3)
-                                )
-                            }
-                        }
-                    }
-                    
-                    on<MultiStepAction> { action ->
-                        actionsOrder.add("Step:${action.step}")
-                        
-                        val resultAction = SagaResultAction("step-${action.step}", action.step)
-                        put(resultAction)
-                    }
-                }
-            }
-            reduceWith { state, action ->
-                when (action) {
-                    is SagaResultAction -> {
-                        if (action.id.startsWith("step-")) {
-                            val mutableList = state.parallelResults.toMutableList()
-                            mutableList.add(action.value)
-                            state.copy(parallelResults = mutableList)
-                        } else {
-                            state
-                        }
-                    }
-                    else -> state
-                }
-            }
-        }
-        
-        dispatchedActions.clear()
-        dispatchAndAdvance(store, SagaResultAction("step-1", 1))
-        dispatchAndAdvance(store, SagaResultAction("step-2", 2))
-        dispatchAndAdvance(store, SagaResultAction("step-3", 3))
-        
-        assertEquals(3, store.state.value.parallelResults.size, "All three steps should be in results")
-        assertTrue(store.state.value.parallelResults.contains(1), "Step 1 should be in results")
-        assertTrue(store.state.value.parallelResults.contains(2), "Step 2 should be in results")
-        assertTrue(store.state.value.parallelResults.contains(3), "Step 3 should be in results")
-        
-        val (chainStore, _) = createTrackedStoreForTest(SagaTestState()) {
-            middleware {
-                sagas {
-                    on<TriggerAction> { action ->
-                        if (action.id == "chain") {
-                            chain(
-                                MultiStepAction(1),
-                                MultiStepAction(2),
-                                MultiStepAction(3)
-                            )
-                        }
-                    }
-                    
-                    on<MultiStepAction> { action ->
-                        actionsOrder.add("ChainStep:${action.step}")
-                        put(SagaResultAction("chainStep-${action.step}", action.step))
-                    }
-                }
-            }
-            reduceWith { state, action ->
-                when (action) {
-                    is SagaResultAction -> {
-                        if (action.id.startsWith("chainStep-")) {
-                            val mutableList = state.parallelResults.toMutableList()
-                            mutableList.add(action.value)
-                            state.copy(parallelResults = mutableList)
-                        } else {
-                            state
-                        }
-                    }
-                    else -> state
-                }
-            }
-        }
-        
-        dispatchAndAdvance(chainStore, SagaResultAction("chainStep-1", 1))
-        dispatchAndAdvance(chainStore, SagaResultAction("chainStep-2", 2))
-        dispatchAndAdvance(chainStore, SagaResultAction("chainStep-3", 3))
-        
-        assertEquals(3, chainStore.state.value.parallelResults.size, "All chain steps should complete")
-        
-        assertEquals(1, chainStore.state.value.parallelResults[0], "First value should be 1")
-        assertEquals(2, chainStore.state.value.parallelResults[1], "Second value should be 2")
-        assertEquals(3, chainStore.state.value.parallelResults[2], "Third value should be 3")
-    }
-    
-    @Test
-    fun `should allow filtering actions that trigger sagas`() = runTest(timeout = 10.seconds) {
+    fun `should support conditional saga triggers`() = runTest(timeout = 10.seconds) {
         val initialState = SagaTestState()
         val triggeredSagas = mutableListOf<String>()
 
         val store = createStoreForTest(initialState) {
             middleware {
-                async()
-                
                 sagas {
-                    onAny({ action -> 
-                        action is TriggerAction && action.id.startsWith("filter-")
-                    }) { action ->
-                        val triggerAction = action as TriggerAction
-                        triggeredSagas.add("filtered:${triggerAction.id}")
-                    }
-                    
-                    onSuccess<String> { result ->
-                        triggeredSagas.add("success:$result")
+                    saga<CounterSagaState>(
+                        name = "FilteredSaga",
+                        initialState = { CounterSagaState("") }
+                    ) {
+                        startsOn<TriggerAction>(
+                            condition = { it.id.startsWith("filter-") }
+                        ) { action ->
+                            triggeredSagas.add("filtered:${action.id}")
+                            SagaTransition.Continue(
+                                CounterSagaState(triggerId = action.id)
+                            )
+                        }
+                        
+                        startsWhen(
+                            condition = { action -> 
+                                action is TriggerAction && action.id.contains("special")
+                            }
+                        ) { action ->
+                            val trigger = action as TriggerAction
+                            triggeredSagas.add("special:${trigger.id}")
+                            SagaTransition.Continue(
+                                CounterSagaState(triggerId = trigger.id)
+                            )
+                        }
                     }
                 }
             }
-            reduceWith { state, action ->
-                state
-            }
+            
+            reduceWith { state, _ -> state }
         }
         
         dispatchAndAdvance(store, TriggerAction("no-match"))
         dispatchAndAdvance(store, TriggerAction("filter-1"))
         dispatchAndAdvance(store, TriggerAction("filter-2"))
+        dispatchAndAdvance(store, TriggerAction("special-event"))
         dispatchAndAdvance(store, TriggerAction("another"))
         
-        assertEquals(2, triggeredSagas.size, "Only matching actions should trigger saga")
-        assertEquals("filtered:filter-1", triggeredSagas[0], "First match should be filter-1")
-        assertEquals("filtered:filter-2", triggeredSagas[1], "Second match should be filter-2")
-        
-        triggeredSagas.clear()
-        
-        val asyncAction = object : AsyncAction<String> {
-            override suspend fun getResult(stateAccessor: StateAccessor): Result<String> {
-                return Result.success("test-result")
-            }
-        }
-        
-        dispatchAndAdvance(store, asyncAction)
-        
-        assertTrue(triggeredSagas.size >= 1, "Success handler should be triggered at least once")
-        assertTrue(triggeredSagas.contains("success:test-result"), "Success handler should receive correct result")
+        assertEquals(3, triggeredSagas.size, "Should trigger matching sagas only")
+        assertTrue(triggeredSagas.contains("filtered:filter-1"), "Should match filter-1")
+        assertTrue(triggeredSagas.contains("filtered:filter-2"), "Should match filter-2")
+        assertTrue(triggeredSagas.contains("special:special-event"), "Should match special event")
     }
     
     @Test
-    fun `should provide saga effect APIs for complex workflows`() = runTest(timeout = 10.seconds) {
+    fun `should manage saga state lifecycle`() = runTest(timeout = 10.seconds) {
         val initialState = SagaTestState()
-        val effectsUsed = mutableListOf<String>()
+        val sagaStateUpdates = mutableListOf<String>()
         
         val store = createStoreForTest(initialState) {
             middleware {
                 sagas {
-                    on<TriggerAction> { action ->
-                        val currentState = getState<SagaTestState>()
-                        effectsUsed.add("getState")
-                        println("Current counter: ${currentState.counter}")
+                    saga<CounterSagaState>(
+                        name = "LifecycleSaga",
+                        initialState = { CounterSagaState("") }
+                    ) {
+                        startsOn<TriggerAction> { action ->
+                            sagaStateUpdates.add("start:${action.id}")
+                            SagaTransition.Continue(
+                                CounterSagaState(
+                                    triggerId = action.id,
+                                    currentValue = 0
+                                )
+                            )
+                        }
                         
-                        put(SagaResultAction(action.id, 10))
-                        effectsUsed.add("put")
+                        on<IncrementSagaCounter> { action, state ->
+                            val newValue = state.currentValue + action.amount
+                            sagaStateUpdates.add("increment:${state.triggerId}:$newValue")
+                            SagaTransition.Continue(
+                                state.copy(currentValue = newValue)
+                            )
+                        }
                         
-                        delay(100)
-                        effectsUsed.add("delay")
-                        
-                        put(SagaCompletedAction(action.id))
-                        effectsUsed.add("put")
+                        on<CompleteSaga>(
+                            condition = { action, state -> action.sagaId == state.triggerId }
+                        ) { action, state ->
+                            sagaStateUpdates.add("complete:${state.triggerId}:${state.currentValue}")
+                            SagaTransition.Complete()
+                        }
                     }
                 }
             }
+            
+            reduceWith { state, _ -> state }
+        }
+        
+        // Start saga
+        dispatchAndAdvance(store, TriggerAction("lifecycle-1"))
+        assertTrue(sagaStateUpdates.contains("start:lifecycle-1"))
+        
+        // Update saga state
+        dispatchAndAdvance(store, IncrementSagaCounter("lifecycle-1", 10))
+        assertTrue(sagaStateUpdates.contains("increment:lifecycle-1:10"))
+        
+        dispatchAndAdvance(store, IncrementSagaCounter("lifecycle-1", 5))
+        assertTrue(sagaStateUpdates.contains("increment:lifecycle-1:15"))
+        
+        // Complete saga
+        dispatchAndAdvance(store, CompleteSaga("lifecycle-1"))
+        assertTrue(sagaStateUpdates.contains("complete:lifecycle-1:15"))
+        
+        // Verify saga no longer responds after completion
+        val previousSize = sagaStateUpdates.size
+        dispatchAndAdvance(store, IncrementSagaCounter("lifecycle-1", 100))
+        assertEquals(previousSize, sagaStateUpdates.size, "Completed saga should not respond")
+    }
+    
+    @Test
+    fun `should support saga effects`() = runTest(timeout = 10.seconds) {
+        val initialState = SagaTestState()
+        val effectsExecuted = mutableListOf<String>()
+        
+        val store = createStoreForTest(initialState) {
+            middleware {
+                middleware { store, next, action ->
+                    if (action is MultiStepAction) {
+                        effectsExecuted.add("dispatch:step-${action.step}")
+                    }
+                    next(action)
+                }
+                
+                sagas {
+                    saga<MultiStepSagaState>(
+                        name = "EffectsSaga",
+                        initialState = { MultiStepSagaState("") }
+                    ) {
+                        startsOn<TriggerAction> { action ->
+                            effectsExecuted.add("saga-start:${action.id}")
+                            
+                            val effects = when (action.id) {
+                                "sequential" -> listOf(
+                                    SagaEffect.Dispatch(MultiStepAction(1)),
+                                    SagaEffect.Delay(50),
+                                    SagaEffect.Dispatch(MultiStepAction(2)),
+                                    SagaEffect.Delay(50),
+                                    SagaEffect.Dispatch(MultiStepAction(3))
+                                )
+                                "parallel" -> listOf(
+                                    SagaEffect.Dispatch(MultiStepAction(1)),
+                                    SagaEffect.Dispatch(MultiStepAction(2)),
+                                    SagaEffect.Dispatch(MultiStepAction(3))
+                                )
+                                else -> emptyList()
+                            }
+                            
+                            SagaTransition.Continue(
+                                MultiStepSagaState(
+                                    startAction = action.id,
+                                    isParallel = action.id == "parallel"
+                                ),
+                                effects = effects
+                            )
+                        }
+                        
+                        on<MultiStepAction> { action, state ->
+                            SagaTransition.Continue(
+                                state.copy(
+                                    completedSteps = state.completedSteps + action.step
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            
             reduceWith { state, action ->
                 when (action) {
-                    is SagaResultAction -> state.copy(
-                        counter = state.counter + action.value,
-                        sagaResults = state.sagaResults + "Result:${action.id}"
-                    )
-                    is SagaCompletedAction -> state.copy(
-                        sagaResults = state.sagaResults + "Completed:${action.triggerId}"
+                    is MultiStepAction -> state.copy(
+                        parallelResults = state.parallelResults.apply { add(action.step) }
                     )
                     else -> state
                 }
             }
         }
         
-        dispatchAndAdvance(store, TriggerAction("effects-test"))
+        // Test sequential effects
+        dispatchAndAdvance(store, TriggerAction("sequential"))
         
-        assertTrue(effectsUsed.size >= 1, "Should have used at least 1 effect")
-        assertTrue(effectsUsed.contains("put"), "Should have used put effect")
+        assertTrue(effectsExecuted.contains("saga-start:sequential"))
+        assertTrue(effectsExecuted.contains("dispatch:step-1"))
+        assertTrue(effectsExecuted.contains("dispatch:step-2"))
+        assertTrue(effectsExecuted.contains("dispatch:step-3"))
         
-        assertEquals(10, store.state.value.counter, "Counter should be updated")
-        assertTrue(store.state.value.sagaResults.size >= 1, "Should have at least 1 result")
+        // Test parallel effects
+        effectsExecuted.clear()
+        store.state.value.parallelResults.clear()
         
-        assertTrue(store.state.value.sagaResults.any { it.contains("Result:effects-test") }, 
-            "Results should contain the correct message")
+        dispatchAndAdvance(store, TriggerAction("parallel"))
+        
+        assertTrue(effectsExecuted.contains("saga-start:parallel"))
+        assertEquals(3, effectsExecuted.count { it.startsWith("dispatch:step-") })
+    }
+    
+    @Test
+    fun `should support cross-saga communication`() = runTest(timeout = 10.seconds) {
+        data class ParentSagaState(val childStarted: Boolean = false)
+        data class ChildSagaState(val parentId: String)
+        
+        data class StartParent(val id: String) : Action
+        data class StartChild(val parentId: String) : Action
+        data class ChildCompleted(val parentId: String) : Action
+        
+        val sagaEvents = mutableListOf<String>()
+        
+        val store = createStoreForTest(SagaTestState()) {
+            middleware {
+                sagas {
+                    saga<ParentSagaState>(
+                        name = "ParentSaga",
+                        initialState = { ParentSagaState() }
+                    ) {
+                        startsOn<StartParent> { action ->
+                            sagaEvents.add("parent-started:${action.id}")
+                            SagaTransition.Continue(
+                                ParentSagaState(childStarted = false),
+                                effects = listOf(
+                                    SagaEffect.Dispatch(StartChild(action.id))
+                                )
+                            )
+                        }
+                        
+                        on<ChildCompleted> { action, state ->
+                            sagaEvents.add("parent-received-child-complete")
+                            SagaTransition.Complete()
+                        }
+                    }
+                    
+                    saga<ChildSagaState>(
+                        name = "ChildSaga", 
+                        initialState = { ChildSagaState("") }
+                    ) {
+                        startsOn<StartChild> { action ->
+                            sagaEvents.add("child-started:${action.parentId}")
+                            SagaTransition.Continue(
+                                ChildSagaState(parentId = action.parentId),
+                                effects = listOf(
+                                    SagaEffect.Delay(100),
+                                    SagaEffect.Dispatch(ChildCompleted(action.parentId))
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            
+            reduceWith { state, _ -> state }
+        }
+        
+        dispatchAndAdvance(store, StartParent("test-parent"))
+        
+        assertTrue(sagaEvents.contains("parent-started:test-parent"))
+        assertTrue(sagaEvents.contains("child-started:test-parent"))
+        assertTrue(sagaEvents.contains("parent-received-child-complete"))
     }
 }
+
+// Helper action for test
+data class AddMessageAction(val message: String) : Action

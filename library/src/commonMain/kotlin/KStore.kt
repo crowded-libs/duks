@@ -1,5 +1,10 @@
 package duks
 
+import duks.storage.PersistenceMiddleware
+import duks.storage.PersistenceStrategy
+import duks.storage.StateStorage
+import duks.storage.SagaStorage
+import duks.storage.SagaPersistenceStrategy
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -231,10 +236,109 @@ class MiddlewareBuilder<TState:StateModel> {
     /**
      * Adds saga middleware to the chain.
      *
+     * @param storage Optional storage for saga persistence. If provided, sagas will be persisted and restored automatically.
+     * @param persistenceStrategy The strategy for when to persist saga state (defaults to OnEveryChange)
+     * @param logError Error logging function
      * @param block A configuration block for defining sagas
      */
-    fun sagas(logError: (String) -> Unit = ::println, block: SagaBuilder.() -> Unit) {
-        middleware.add(sagaMiddleware(logError, block))
+    fun sagas(
+        storage: SagaStorage? = null,
+        persistenceStrategy: SagaPersistenceStrategy = SagaPersistenceStrategy.OnEveryChange,
+        logError: (String) -> Unit = ::println,
+        block: SagaRegistry<TState>.() -> Unit
+    ) {
+        val registry = SagaRegistry<TState>()
+        block(registry)
+        val sagaMiddleware = sagaMiddleware(registry, storage, persistenceStrategy, logError)
+        middleware.add(sagaMiddleware)
+        
+        // If the middleware is lifecycle-aware, register it
+        if (sagaMiddleware is StoreLifecycleAware<*>) {
+            @Suppress("UNCHECKED_CAST")
+            lifecycleAware(sagaMiddleware as StoreLifecycleAware<TState>)
+        }
+    }
+    
+    /**
+     * Adds persistence middleware to the chain.
+     * 
+     * The persistence middleware should be added after exception handling but before async middleware to ensure:
+     * 1. Exceptions during persistence are properly handled
+     * 2. State restoration happens before any async operations
+     * 3. The middleware chain maintains proper execution order
+     * 
+     * @param storage The storage implementation to use for persistence
+     * @param strategy The persistence strategy determining when to persist
+     * @param errorHandler Error handler for persistence failures
+     */
+    fun persistence(
+        storage: StateStorage<TState>,
+        strategy: PersistenceStrategy = PersistenceStrategy.Debounced(500),
+        errorHandler: (Exception) -> Unit = {}
+    ) {
+        val persistenceMiddleware = PersistenceMiddleware(
+            storage = storage,
+            strategy = strategy,
+            errorHandler = errorHandler
+        )
+        // Add as middleware to handle RestoreStateAction and OnAction strategies
+        middleware { store, next, action ->
+            // Special handling for RestoreStateAction
+            if (action is RestoreStateAction<*>) {
+                // Pass it through to let the reducer handle it
+                next(action)
+                action
+            } else {
+                // Process the action first
+                val result = next(action)
+                
+                // Get the current state after processing
+                val currentState = store.state.value
+                
+                // Handle state change for non-OnAction strategies
+                when (strategy) {
+                    is PersistenceStrategy.OnAction -> { /* Skip - handled below */ }
+                    is PersistenceStrategy.Combined -> {
+                        // Only handle non-OnAction strategies
+                        if (strategy.strategies.any { it !is PersistenceStrategy.OnAction }) {
+                            // Handle state change directly in the current coroutine context
+                            persistenceMiddleware.handleStateChange(currentState, store)
+                        }
+                    }
+                    else -> {
+                        // All other strategies - handle directly in the current coroutine context
+                        persistenceMiddleware.handleStateChange(currentState, store)
+                    }
+                }
+                
+                // Handle OnAction strategy
+                if (strategy is PersistenceStrategy.OnAction &&
+                    action::class in strategy.actionTypes) {
+                    try {
+                        storage.save(currentState)
+                    } catch (e: Exception) {
+                        errorHandler(e)
+                    }
+                }
+                
+                // Handle OnAction in combined strategies
+                if (strategy is PersistenceStrategy.Combined) {
+                    strategy.strategies.filterIsInstance<PersistenceStrategy.OnAction>().forEach { onActionStrategy ->
+                        if (action::class in onActionStrategy.actionTypes) {
+                            try {
+                                storage.save(currentState)
+                            } catch (e: Exception) {
+                                errorHandler(e)
+                            }
+                        }
+                    }
+                }
+                
+                result
+            }
+        }
+        // Add as lifecycle-aware to handle state restoration
+        lifecycleAware(persistenceMiddleware)
     }
 
     /**

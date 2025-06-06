@@ -7,13 +7,14 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.kotlinx.serialization)
     alias(libs.plugins.dokka)
     alias(libs.plugins.vanniktech.mavenPublish)
     alias(libs.plugins.composeCompiler)
 }
 
 group = "io.github.crowded-libs"
-version = "0.1.0"
+version = "0.2.0"
 
 kotlin {
     jvm()
@@ -53,6 +54,7 @@ kotlin {
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.kotlinx.serialization.json)
             }
         }
     }
