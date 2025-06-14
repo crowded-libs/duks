@@ -21,7 +21,7 @@ class BasicPersistenceTest {
     }
     
     @Test
-    fun testInMemoryStorage() = runTest {
+    fun `should perform basic operations with in-memory storage`() = runTest {
         val storage = InMemoryStorage<TestState>()
         
         assertFalse(storage.exists())
@@ -38,7 +38,7 @@ class BasicPersistenceTest {
     }
     
     @Test
-    fun testPersistenceMiddleware() = runTest {
+    fun `should persist state changes with persistence middleware`() = runTest {
         val storage = InMemoryStorage<TestState>()
 
         val store = createStoreForTest(initialState = TestState(0)) {
@@ -51,12 +51,8 @@ class BasicPersistenceTest {
             }
         }
         
-        // Dispatch action and wait
-        store.dispatch(IncrementAction(5))
-        runCurrent()
-        advanceUntilIdle()
-        delay(200) // Allow persistence to complete
-        
+        dispatchAndAdvance(store,IncrementAction(5))
+
         // Check state was persisted
         assertTrue(storage.exists())
         val loaded = storage.load()!!
@@ -64,7 +60,7 @@ class BasicPersistenceTest {
     }
     
     @Test
-    fun testStateRestoration() = runTest {
+    fun `should restore state from storage on store creation`() = runTest {
         val storage = InMemoryStorage<TestState>()
 
         // Pre-save state
@@ -84,8 +80,7 @@ class BasicPersistenceTest {
         // Wait for restoration
         runCurrent()
         advanceUntilIdle()
-        delay(200)
-        
+
         // State should be restored
         assertEquals(42, store.state.value.value)
     }

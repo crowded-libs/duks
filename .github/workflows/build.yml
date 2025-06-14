@@ -33,7 +33,7 @@ jobs:
         with:
           filters: |
             src_changed:
-              - 'library/**'
+              - 'duks/**'
               - 'build.gradle.kts'
               - 'gradle.properties'
               - 'settings.gradle.kts'

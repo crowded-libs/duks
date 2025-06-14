@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "duks"
-include(":library")
+include(":duks")

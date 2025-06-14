@@ -1,6 +1,7 @@
 package duks
 
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -191,24 +192,12 @@ class CustomAsyncActionTest {
         // Test with Int result type
         dispatchAndAdvance(store, TypedResultAsyncAction(42))
 
-        // Wait for Int result to be processed
-        var intResultProcessed = false
-        while (!intResultProcessed) {
-            delay(10)
-            intResultProcessed = store.state.value.customResults.any { it.startsWith("Int:") }
-        }
+        store.state.first { it.customResults.any { it.startsWith("Int:")} }
 
-        // Test with String result type
         dispatchAndAdvance(store, TypedResultAsyncAction("Hello"))
 
-        // Wait for String result to be processed
-        var stringResultProcessed = false
-        while (!stringResultProcessed) {
-            delay(10)
-            stringResultProcessed = store.state.value.customResults.any { it.startsWith("String:") }
-        }
+        store.state.first { it.customResults.any { it.startsWith("String:")} }
 
-        advanceUntilIdle()
 
         // Verify both result types were processed correctly
         assertEquals(42, store.state.value.counter, 

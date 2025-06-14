@@ -2,6 +2,7 @@ package duks.storage
 
 import duks.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.*
 import kotlinx.serialization.Serializable
 import kotlin.test.*
@@ -38,7 +39,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testJsonFileStorage() = runTest {
+    fun `should save and load state with JSON file storage`() = runTest {
         val storage = createJsonFileStorage<TestState>("test.json")
         
         val testState = TestState(
@@ -65,7 +66,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testPersistenceOnEveryChange() = runTest {
+    fun `should persist state on every change`() = runTest {
         val fileStorage = createJsonFileStorage<TestState>("state.json")
         
         // Create a composite storage with testing hooks
@@ -107,7 +108,7 @@ class PersistenceTest {
         waitForSave(testableStorage) {
             store.dispatch(IncrementAction(5))
         }
-        
+
         // Verify persistence
         assertTrue(fileStorage.exists())
         val persisted = fileStorage.load()!!
@@ -124,7 +125,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testPersistenceDebounced() = runTest {
+    fun `should debounce state persistence`() = runTest {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -149,12 +150,12 @@ class PersistenceTest {
         
         // Should not persist immediately
         runCurrent()
-        assertEquals(0, testableStorage.saveCount)
+        assertEquals(0, testableStorage.state.value.saveCount)
         
         // Wait less than debounce time
         advanceTimeBy(100)
         runCurrent()
-        assertEquals(0, testableStorage.saveCount)
+        assertEquals(0, testableStorage.state.value.saveCount)
         
         // Wait for debounce to complete (total time should be > 200ms)
         advanceTimeBy(150)  // Now at 250ms total
@@ -162,7 +163,7 @@ class PersistenceTest {
         advanceUntilIdle()
         
         // Check if data was persisted
-        assertEquals(1, testableStorage.saveCount, "Should have saved once after debounce")
+        assertEquals(1, testableStorage.state.value.saveCount, "Should have saved once after debounce")
         assertTrue(inMemoryStorage.exists())
         
         // Only final state should be persisted
@@ -172,7 +173,7 @@ class PersistenceTest {
     
     @Test
     @Ignore  // Throttled persistence uses real time, not test time
-    fun testPersistenceThrottled() = runTest {
+    fun `should throttle state persistence`() = runTest {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -191,10 +192,10 @@ class PersistenceTest {
         advanceUntilIdle()
         
         // First action should save immediately (throttle allows first save)
-        store.dispatch(IncrementAction(1))
-        runCurrent()
-        advanceUntilIdle()
-        assertEquals(1, testableStorage.saveCount)
+        waitForSave(testableStorage) {
+            store.dispatch(IncrementAction(1))
+        }
+        assertEquals(1, testableStorage.state.value.saveCount)
         
         // Dispatch multiple actions quickly
         repeat(4) { i ->
@@ -202,19 +203,20 @@ class PersistenceTest {
             advanceTimeBy(50) // Less than throttle interval
             runCurrent()
         }
+        testableStorage.state.first { it.saveCount == 1 }
         
         // Should still be 1 save (throttled)
-        assertEquals(1, testableStorage.saveCount)
+        assertEquals(1, testableStorage.state.value.saveCount)
         
         // Wait for throttle interval to pass from first save
         advanceTimeBy(150) // Total time now > 300ms from first save
         runCurrent()
         
         // One more action should trigger another save
-        store.dispatch(IncrementAction(1))
-        runCurrent()
-        advanceUntilIdle()
-        assertEquals(2, testableStorage.saveCount)
+        waitForSave(testableStorage) {
+            store.dispatch(IncrementAction(1))
+        }
+        assertEquals(2, testableStorage.state.value.saveCount)
         
         // Verify final state
         val persisted = inMemoryStorage.load()!!
@@ -222,7 +224,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testPersistenceOnAction() = runTest {
+    fun `should persist state only on specific actions`() = runTest {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -241,14 +243,14 @@ class PersistenceTest {
         store.dispatch(UpdateMessageAction("No save yet"))
         runCurrent()
         assertFalse(inMemoryStorage.exists())
-        assertEquals(0, testableStorage.saveCount)
+        assertEquals(0, testableStorage.state.value.saveCount)
         
         // SaveAction should trigger persistence
         waitForSave(testableStorage) {
             store.dispatch(SaveAction)
         }
         assertTrue(inMemoryStorage.exists())
-        assertEquals(1, testableStorage.saveCount)
+        assertEquals(1, testableStorage.state.value.saveCount)
         
         val persisted = inMemoryStorage.load()!!
         assertEquals(10, persisted.counter)
@@ -256,7 +258,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testPersistenceConditional() = runTest {
+    fun `should persist state conditionally`() = runTest {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -280,14 +282,15 @@ class PersistenceTest {
         store.dispatch(IncrementAction(2)) // counter = 3
         runCurrent()
         assertFalse(inMemoryStorage.exists())
-        assertEquals(0, testableStorage.saveCount)
+        assertEquals(0, testableStorage.state.value.saveCount)
         
         // This should persist (counter = 5)
         waitForSave(testableStorage) {
             store.dispatch(IncrementAction(2))
         }
+
         assertTrue(inMemoryStorage.exists())
-        assertEquals(1, testableStorage.saveCount)
+        assertEquals(1, testableStorage.state.value.saveCount)
         
         var persisted = inMemoryStorage.load()!!
         assertEquals(5, persisted.counter)
@@ -300,14 +303,14 @@ class PersistenceTest {
             store.dispatch(IncrementAction(5)) // counter = 10
         }
         assertTrue(inMemoryStorage.exists())
-        assertEquals(2, testableStorage.saveCount)
+        assertEquals(2, testableStorage.state.value.saveCount)
         
         persisted = inMemoryStorage.load()!!
         assertEquals(10, persisted.counter)
     }
     
     @Test
-    fun testPersistenceCombined() = runTest {
+    fun `should support combined persistence strategies`() = runTest {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -329,36 +332,35 @@ class PersistenceTest {
         // Neither condition met - no save
         store.dispatch(IncrementAction(5))
         runCurrent()
-        assertEquals(0, testableStorage.saveCount)
-        
-        // SaveAction triggers save
+        assertEquals(0, testableStorage.state.value.saveCount)
+
         waitForSave(testableStorage) {
             store.dispatch(SaveAction)
         }
-        assertEquals(1, testableStorage.saveCount)
-        
-        // Conditional triggers save (counter >= 10)
+        assertEquals(1, testableStorage.state.value.saveCount)
+
         waitForSave(testableStorage) {
             store.dispatch(IncrementAction(5)) // counter = 10
         }
-        assertEquals(2, testableStorage.saveCount)
+        assertEquals(2, testableStorage.state.value.saveCount)
     }
     
     @Test
-    fun testStateRestoration() = runTest {
+    fun `should restore state from storage`() = runTest {
         val fileStorage = createJsonFileStorage<TestState>("restore.json")
-        
+        val testableStorage = fileStorage.testable()
+
         // Pre-save a state
         val savedState = TestState(
             counter = 99,
             message = "Restored from disk",
             items = listOf("a", "b", "c")
         )
-        fileStorage.save(savedState)
-        
         // Wrap with testable functionality to wait for restore
-        val testableStorage = fileStorage.testable()
-        
+        waitForSave(testableStorage) {
+            testableStorage.save(savedState)
+        }
+
         // Create store with persistence - should restore
         var restoredState: TestState? = null
         val store = createStoreForTest(TestState()) {
@@ -377,12 +379,10 @@ class PersistenceTest {
                 )
             }
         }
-        
-        // Wait for restoration to complete
-        while (restoredState == null && testableStorage.loadCount < 1) {
-            runCurrent()
-            advanceTimeBy(10)
-        }
+
+        testableStorage.state.first { it.loadCount == 1 }
+        runCurrent()
+        advanceUntilIdle()
         
         // Verify restoration happened
         assertNotNull(restoredState)
@@ -395,7 +395,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testPersistenceErrorHandling() = runTest {
+    fun `should handle persistence errors gracefully`() = runTest {
         val errors = mutableListOf<Exception>()
         val failingStorage = object : StateStorage<TestState> {
             override suspend fun save(state: TestState) {
@@ -431,7 +431,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testCompositeStorage() = runTest {
+    fun `should save to multiple storages with composite storage`() = runTest {
         val storage1 = createJsonFileStorage<TestState>("composite1.json")
         val storage2 = createJsonFileStorage<TestState>("composite2.json")
         val composite = CompositeStorage(listOf(storage1, storage2))
@@ -465,7 +465,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun testMultipleStoresWithSameStorage() = runTest {
+    fun `should share storage between multiple stores`() = runTest {
         val fileStorage = createJsonFileStorage<TestState>("shared.json")
         
         // Wrap file storage with testable functionality
@@ -481,12 +481,11 @@ class PersistenceTest {
                 )
             }
         }
-        
+
         waitForSave(testableStorage) {
             store1.dispatch(IncrementAction(9)) // counter = 10
         }
-        
-        // Reset counters for tracking the second store's operations
+
         testableStorage.resetCounters()
         
         // Second store should restore from first store's state
@@ -499,13 +498,10 @@ class PersistenceTest {
                 )
             }
         }
-        
-        // Wait for the load operation to complete
-        while (testableStorage.loadCount < 1) {
-            runCurrent()
-            advanceTimeBy(10)
-        }
-        
+        testableStorage.state.first { it.loadCount == 1 }
+        runCurrent()
+        advanceUntilIdle()
+
         // Store2 should have store1's persisted state
         assertEquals(10, store2.state.value.counter)
     }

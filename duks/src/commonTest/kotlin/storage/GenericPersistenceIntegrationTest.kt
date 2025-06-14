@@ -19,7 +19,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testDirectStatePersistence() = runTest {
+    fun `should persist state directly to storage`() = runTest {
         // Direct state storage
         val storage = InMemoryStorage<CounterState>()
         
@@ -62,7 +62,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testPersistenceWithSetAction() = runTest {
+    fun `should persist state when set action is dispatched`() = runTest {
         // Storage that saves state directly
         val storage = InMemoryStorage<CounterState>()
         
@@ -86,7 +86,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testDebouncedPersistence() = runTest {
+    fun `should debounce state persistence with configured delay`() = runTest {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {
@@ -118,7 +118,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testConditionalPersistence() = runTest {
+    fun `should persist state conditionally based on custom logic`() = runTest {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {
@@ -149,7 +149,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testOnActionPersistence() = runTest {
+    fun `should persist state only on specific actions`() = runTest {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {
@@ -177,7 +177,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testStateRestorationOnStoreCreation() = runTest {
+    fun `should restore state from storage on store creation`() = runTest {
         val storage = InMemoryStorage<CounterState>()
         
         // Pre-save state
@@ -202,7 +202,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testPersistenceErrorHandling() = runTest {
+    fun `should handle persistence errors gracefully`() = runTest {
         // Storage that throws errors
         val storage = object : StateStorage<CounterState> {
             private var shouldFail = true
@@ -244,7 +244,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun testCombinedPersistenceStrategies() = runTest {
+    fun `should support combined persistence strategies`() = runTest {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {

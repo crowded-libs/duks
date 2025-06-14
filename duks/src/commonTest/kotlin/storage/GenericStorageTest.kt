@@ -8,7 +8,7 @@ data class TestState(val value: String) : StateModel
 
 class GenericStorageTest {
     @Test
-    fun testInMemoryStorage() = runTest {
+    fun `should save and load state with in-memory storage`() = runTest {
         // Create storage that works directly with state
         val storage = InMemoryStorage<TestState>()
         
@@ -28,7 +28,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun testStorageWithDifferentStateTypes() = runTest {
+    fun `should work with different state types`() = runTest {
         // Test with different state types
         data class UserState(val name: String, val age: Int) : StateModel
         
@@ -44,7 +44,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun testCompositeStorage() = runTest {
+    fun `should save to multiple storages with composite storage`() = runTest {
         // Test composite storage that saves to multiple storages
         val storage1 = InMemoryStorage<TestState>()
         val storage2 = InMemoryStorage<TestState>()
@@ -71,7 +71,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun testCompositeStorageWithFailure() = runTest {
+    fun `should handle failures gracefully in composite storage`() = runTest {
         // Test composite storage when one storage fails
         val workingStorage = InMemoryStorage<TestState>()
         val failingStorage = object : StateStorage<TestState> {
@@ -114,7 +114,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun testStorageStateIsolation() = runTest {
+    fun `should maintain state isolation between saves`() = runTest {
         // Ensure storage maintains state isolation
         val storage = InMemoryStorage<TestState>()
         

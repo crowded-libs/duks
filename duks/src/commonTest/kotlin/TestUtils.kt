@@ -102,33 +102,8 @@ fun <TState : StateModel> createTracingMiddleware(
  * @param store The store to dispatch the action to
  * @param action The action to dispatch
  */
-suspend fun <TState : StateModel> TestScope.dispatchAndAdvance(store: KStore<TState>, action: Action) {
+fun <TState : StateModel> TestScope.dispatchAndAdvance(store: KStore<TState>, action: Action) {
     store.dispatch(action)
     runCurrent()
-    advanceTimeBy(5)
-    runCurrent()
     advanceUntilIdle()
-}
-
-/**
- * Creates a store with middleware that traces execution order
- * 
- * @param initialState The initial state of the store
- * @param executionOrder A mutable list to track middleware execution order
- * @param reducer A reducer function
- * @param middlewareSetup A lambda to configure middleware
- * @return The configured store
- */
-fun <TState : StateModel> TestScope.createStoreWithTracing(
-    initialState: TState,
-    executionOrder: MutableList<String>,
-    reducer: Reducer<TState>,
-    middlewareSetup: MiddlewareBuilder<TState>.() -> Unit = {}
-): KStore<TState> {
-    return createStoreForTest(initialState) {
-        middleware {
-            middlewareSetup()
-        }
-        reduceWith(reducer)
-    }
 }
