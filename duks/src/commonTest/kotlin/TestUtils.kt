@@ -1,6 +1,50 @@
 package duks
 
+import duks.logging.LogLevel
+import duks.logging.Logger
 import kotlinx.coroutines.test.*
+
+// Test logger that collects log messages
+class TestLogger : Logger {
+    override var logLevel: LogLevel = LogLevel.TRACE
+    val messages = mutableListOf<String>()
+    
+    override fun trace(message: String, vararg args: Any?) {
+        messages.add("[TRACE] ${formatMessage(message, *args)}")
+    }
+    
+    override fun debug(message: String, vararg args: Any?) {
+        messages.add("[DEBUG] ${formatMessage(message, *args)}")
+    }
+    
+    override fun info(message: String, vararg args: Any?) {
+        messages.add("[INFO] ${formatMessage(message, *args)}")
+    }
+    
+    override fun warn(message: String, vararg args: Any?) {
+        messages.add("[WARN] ${formatMessage(message, *args)}")
+    }
+    
+    override fun error(message: String, vararg args: Any?) {
+        messages.add("[ERROR] ${formatMessage(message, *args)}")
+    }
+    
+    override fun fatal(message: String, vararg args: Any?) {
+        messages.add("[FATAL] ${formatMessage(message, *args)}")
+    }
+    
+    override fun warn(message: String, throwable: Throwable, vararg args: Any?) {
+        messages.add("[WARN] ${formatMessage(message, *args)} - ${throwable.message}")
+    }
+    
+    override fun error(message: String, throwable: Throwable, vararg args: Any?) {
+        messages.add("[ERROR] ${formatMessage(message, *args)} - ${throwable.message}")
+    }
+    
+    override fun fatal(message: String, throwable: Throwable, vararg args: Any?) {
+        messages.add("[FATAL] ${formatMessage(message, *args)} - ${throwable.message}")
+    }
+}
 
 fun <TState : StateModel> TestScope.createStoreForTest(
     initialState: TState,

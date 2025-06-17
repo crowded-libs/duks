@@ -1,6 +1,8 @@
 package duks
 
 import duks.storage.*
+import duks.logging.Logger
+import duks.logging.error
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -33,14 +35,14 @@ private fun shouldPersist(strategy: SagaPersistenceStrategy, event: SagaEvent): 
  * @param registry The saga registry containing all saga definitions
  * @param storage Optional storage for saga persistence. If provided, sagas will be persisted and restored automatically.
  * @param persistenceStrategy The strategy for when to persist saga state (defaults to OnEveryChange)
- * @param logError Error logging function
+ * @param logger Logger for error logging
  */
 fun <TState : StateModel> sagaMiddleware(
     registry: SagaRegistry<TState>,
     storage: SagaStorage? = null,
     persistenceStrategy: SagaPersistenceStrategy = SagaPersistenceStrategy.OnEveryChange,
-    logError: (String) -> Unit = ::println
-): Middleware<TState> = SagaMiddlewareImpl(registry, storage, persistenceStrategy, logError)
+    logger: Logger = Logger.default()
+): Middleware<TState> = SagaMiddlewareImpl(registry, storage, persistenceStrategy, logger)
 
 /**
  * Implementation of saga middleware with built-in persistence support.
@@ -49,7 +51,7 @@ private class SagaMiddlewareImpl<TState : StateModel>(
     private val registry: SagaRegistry<TState>,
     private val storage: SagaStorage?,
     private val persistenceStrategy: SagaPersistenceStrategy,
-    private val logError: (String) -> Unit
+    private val logger: Logger
 ) : Middleware<TState>, StoreLifecycleAware<TState> {
     
     private val instanceManager = SagaInstanceManager()
@@ -69,7 +71,7 @@ private class SagaMiddlewareImpl<TState : StateModel>(
                     }
                 }
             } catch (e: Exception) {
-                logError("Error restoring sagas: ${e.message}")
+                logger.error(e) { "Error restoring sagas" }
             }
         }
     }
@@ -84,9 +86,9 @@ private class SagaMiddlewareImpl<TState : StateModel>(
         // Process action through all registered sagas
         store.ioScope.launch {
             try {
-                processAction(action, store, next, registry, instanceManager, storage, persistenceStrategy, logError)
+                processAction(action, store, next, registry, instanceManager, storage, persistenceStrategy, logger)
             } catch (e: Exception) {
-                logError("Error in saga middleware: ${e.message}")
+                logger.error(e) { "Error in saga middleware" }
             }
         }
         
@@ -150,14 +152,14 @@ private suspend fun <TState : StateModel> processAction(
     instanceManager: SagaInstanceManager,
     storage: SagaStorage?,
     persistenceStrategy: SagaPersistenceStrategy,
-    logError: (String) -> Unit
+    logger: Logger
 ) {
     // Check for new saga triggers
     registry.sagas.values.forEach { configuredSaga ->
         try {
-            checkAndStartSaga(action, configuredSaga, store, instanceManager, storage, persistenceStrategy, logError)
+            checkAndStartSaga(action, configuredSaga, store, instanceManager, storage, persistenceStrategy, logger)
         } catch (e: Exception) {
-            logError("Error starting saga ${configuredSaga.name}: ${e.message}")
+            logger.error(e, configuredSaga.name) { "Error starting saga {name}" }
         }
     }
     
@@ -167,10 +169,10 @@ private suspend fun <TState : StateModel> processAction(
         try {
             val saga = registry.sagas[instance.sagaName]
             if (saga != null) {
-                processInstanceAction(action, instance, saga, store, instanceManager, storage, persistenceStrategy, logError)
+                processInstanceAction(action, instance, saga, store, instanceManager, storage, persistenceStrategy, logger)
             }
         } catch (e: Exception) {
-            logError("Error processing saga instance ${instance.id}: ${e.message}")
+            logger.error(e, instance.id) { "Error processing saga instance {id}" }
         }
     }
 }
@@ -185,7 +187,7 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
     instanceManager: SagaInstanceManager,
     storage: SagaStorage?,
     persistenceStrategy: SagaPersistenceStrategy,
-    logError: (String) -> Unit
+    logger: Logger
 ) {
     @Suppress("UNCHECKED_CAST")
     val typedSaga = saga as ConfiguredSaga<Any>
@@ -205,7 +207,7 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
         val context = SagaContextImpl<Any>(instanceId, store, { action ->
             store.dispatch(action)
             action
-        }, instanceManager, logError)
+        }, instanceManager, logger)
         
         // Execute the first matching handler
         val handler = startHandlers.first()
@@ -228,7 +230,7 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
                     try {
                         storage.save(instanceId, instance)
                     } catch (e: Exception) {
-                        logError("Failed to persist saga instance ${instanceId}: ${e.message}")
+                        logger.error(e, instanceId) { "Failed to persist saga instance {instanceId}" }
                     }
                 }
                 
@@ -254,7 +256,7 @@ private suspend fun <TState : StateModel> processInstanceAction(
     instanceManager: SagaInstanceManager,
     storage: SagaStorage?,
     persistenceStrategy: SagaPersistenceStrategy,
-    logError: (String) -> Unit
+    logger: Logger
 ) {
     @Suppress("UNCHECKED_CAST")
     val typedSaga = saga as ConfiguredSaga<Any>
@@ -275,7 +277,7 @@ private suspend fun <TState : StateModel> processInstanceAction(
         val context = SagaContextImpl<Any>(instance.id, store, { action ->
             store.dispatch(action)
             action
-        }, instanceManager, logError)
+        }, instanceManager, logger)
         
         // Execute the first matching handler
         val handler = activeHandlers.first()
@@ -293,7 +295,7 @@ private suspend fun <TState : StateModel> processInstanceAction(
                         try {
                             storage.save(instance.id, updatedInstance)
                         } catch (e: Exception) {
-                            logError("Failed to persist updated saga instance ${instance.id}: ${e.message}")
+                            logger.error(e, instance.id) { "Failed to persist updated saga instance {id}" }
                         }
                     }
                 }
@@ -310,7 +312,7 @@ private suspend fun <TState : StateModel> processInstanceAction(
                     try {
                         storage.remove(instance.id)
                     } catch (e: Exception) {
-                        logError("Failed to remove completed saga instance ${instance.id}: ${e.message}")
+                        logger.error(e, instance.id) { "Failed to remove completed saga instance {id}" }
                     }
                 }
                 
@@ -351,7 +353,7 @@ private class SagaContextImpl<TSagaState>(
     private val store: KStore<*>,
     private val dispatchFn: suspend (Action) -> Action,
     private val instanceManager: SagaInstanceManager,
-    private val logError: (String) -> Unit
+    private val logger: Logger
 ) : SagaContext<TSagaState> {
     
     @Suppress("UNCHECKED_CAST")

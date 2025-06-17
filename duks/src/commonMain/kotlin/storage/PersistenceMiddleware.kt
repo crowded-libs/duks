@@ -1,6 +1,11 @@
 package duks.storage
 
 import duks.*
+import duks.logging.Logger
+import duks.logging.debug
+import duks.logging.error
+import duks.logging.info
+import duks.logging.warn
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -15,7 +20,8 @@ import kotlinx.datetime.Clock
 class PersistenceMiddleware<TState : StateModel>(
     private val storage: StateStorage<TState>,
     private val strategy: PersistenceStrategy = PersistenceStrategy.Debounced(500),
-    private val errorHandler: (Exception) -> Unit = {}
+    private val errorHandler: (Exception) -> Unit = {},
+    private val logger: Logger = Logger.default()
 ) : StoreLifecycleAware<TState> {
     
     private var persistenceJob: Job? = null
@@ -24,11 +30,14 @@ class PersistenceMiddleware<TState : StateModel>(
     
     override suspend fun onStoreCreated(store: KStore<TState>) {
         // Restore persisted state
+        logger.info { "Attempting to restore persisted state" }
         try {
             storage.load()?.let { storedState ->
+                logger.info(storedState::class.simpleName) { "Successfully restored state of type: {stateType}" }
                 store.dispatch(RestoreStateAction(storedState))
             }
         } catch (e: Exception) {
+            logger.warn(e.message ?: "Unknown error") { "Failed to restore state: {error}" }
             errorHandler(e)
         }
     }
@@ -72,8 +81,10 @@ class PersistenceMiddleware<TState : StateModel>(
     
     private suspend fun persist(state: TState) {
         try {
+            logger.debug(strategy::class.simpleName) { "Persisting state using strategy: {strategy}" }
             storage.save(state)
         } catch (e: Exception) {
+            logger.error(e) { "Failed to persist state" }
             errorHandler(e)
         }
     }

@@ -1,5 +1,9 @@
 package duks
 
+import duks.logging.Logger
+import duks.logging.debug
+import duks.logging.error
+
 /**
  * Represents a middleware function in the Duks state management system.
  *
@@ -84,14 +88,14 @@ fun <TState:StateModel> asyncMiddleware(): Middleware<TState> = { store, next, a
  * subsequent middleware and the reducer, allowing for easy debugging of action
  * flow and state changes.
  *
- * @param log The function to use for logging (defaults to println)
+ * @param logger The logger to use for logging (defaults to Logger.default())
  * @param TState The type of state model used in the store
  * @return A middleware function that logs actions
  */
-fun <TState:StateModel> loggerMiddleware(log: (String) -> Unit = ::println): Middleware<TState> = { store, next, action ->
-    log("Action: $action")
+fun <TState:StateModel> loggerMiddleware(logger: Logger = Logger.default()): Middleware<TState> = { store, next, action ->
+    logger.debug(action) { "Action: {action}" }
     next(action)
-    log("After Action: $action")
+    logger.debug(action) { "After Action: {action}" }
     action
 }
 
@@ -101,15 +105,15 @@ fun <TState:StateModel> loggerMiddleware(log: (String) -> Unit = ::println): Mid
  * This middleware wraps the next middleware in a try-catch block, preventing
  * exceptions from crashing the application and logging them instead.
  *
- * @param logError The function to use for logging errors (defaults to println)
+ * @param logger The logger to use for logging errors (defaults to Logger.default())
  * @param TState The type of state model used in the store
  * @return A middleware function that handles exceptions
  */
-fun <TState:StateModel> exceptionMiddleware(logError: (String) -> Unit = ::println): Middleware<TState> = { store, next, action ->
+fun <TState:StateModel> exceptionMiddleware(logger: Logger = Logger.default()): Middleware<TState> = { store, next, action ->
     try {
         next(action)
     } catch (e: Exception) {
-        logError("Exception: $e")
+        logger.error(e, action) { "Exception processing action: {action}" }
     }
     action
 }

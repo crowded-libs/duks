@@ -142,13 +142,11 @@ class StoreTest {
 
     @Test
     fun `should log actions with logger middleware`() = runTest {
-        val logs = mutableListOf<String>()
+        val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
             middleware {
-                middleware(loggerMiddleware<TestState> { message ->
-                    logs.add(message)
-                })
+                middleware(loggerMiddleware<TestState>(testLogger))
             }
             reduceWith { state, action ->
                 when (action) {
@@ -160,20 +158,18 @@ class StoreTest {
 
         dispatchAndAdvance(store, IncrementAction(3))
 
-        assertEquals(2, logs.size)
-        assertTrue(logs[0].contains("Action:"))
-        assertTrue(logs[1].contains("After Action:"))
+        assertEquals(2, testLogger.messages.size)
+        assertTrue(testLogger.messages[0].contains("Action:"))
+        assertTrue(testLogger.messages[1].contains("After Action:"))
     }
 
     @Test
     fun `should handle exceptions with exception middleware`() = runTest {
-        val errors = mutableListOf<String>()
+        val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
             middleware {
-                middleware(exceptionMiddleware<TestState> { error ->
-                    errors.add(error)
-                })
+                middleware(exceptionMiddleware<TestState>(testLogger))
             }
             reduceWith { state, action ->
                 when (action) {
@@ -190,8 +186,8 @@ class StoreTest {
 
         dispatchAndAdvance(store, ErrorAction("Test error"))
 
-        assertEquals(1, errors.size)
-        assertTrue(errors[0].contains("Test error"))
+        assertEquals(1, testLogger.messages.size)
+        assertTrue(testLogger.messages[0].contains("Test error"))
     }
 
     @Test

@@ -56,12 +56,17 @@ class MiddlewareTest {
     fun `should capture logs before and after action`() = runTest {
         val logs = mutableListOf<String>()
         
+        val loggingMiddleware: Middleware<TestState> = { store, next, action ->
+            logs.add("Action: ${action::class.simpleName}")
+            val result = next(action)
+            logs.add("After Action: ${action::class.simpleName}")
+            result
+        }
+        
         val initialState = TestState()
         val store = createStoreForTest(initialState) {
             middleware {
-                middleware(loggerMiddleware<TestState> { message -> 
-                    logs.add(message)
-                })
+                middleware(loggingMiddleware)
             }
             reduceWith { state, action ->
                 when (action) {
@@ -90,14 +95,20 @@ class MiddlewareTest {
         val customMiddleware1 = createTracingMiddleware<TestState>(middlewareExecutionOrder, "middleware1")
         val customMiddleware2 = createTracingMiddleware<TestState>(middlewareExecutionOrder, "middleware2")
         
+        val loggingMiddleware: Middleware<TestState> = { store, next, action ->
+            logs.add("Action: $action")
+            middlewareExecutionOrder.add("logger before")
+            val result = next(action)
+            logs.add("After Action: $action")
+            middlewareExecutionOrder.add("logger after")
+            result
+        }
+        
         val initialState = TestState()
         val store = createStoreForTest(initialState) {
             middleware {
                 middleware(customMiddleware1)
-                middleware(loggerMiddleware<TestState> { message -> 
-                    logs.add(message)
-                    middlewareExecutionOrder.add("logger ${if (message.startsWith("Action")) "before" else "after"}")
-                })
+                middleware(loggingMiddleware)
                 middleware(customMiddleware2)
             }
             reduceWith { state, action ->

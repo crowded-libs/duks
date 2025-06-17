@@ -5,6 +5,10 @@ import duks.storage.PersistenceStrategy
 import duks.storage.StateStorage
 import duks.storage.SagaStorage
 import duks.storage.SagaPersistenceStrategy
+import duks.logging.Logger
+import duks.logging.debug
+import duks.logging.info
+import duks.logging.trace
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,12 +48,14 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
                                                      private val reducer: Reducer<TState>,
                                                      private val middleware: Middleware<TState>,
                                                      internal val ioScope: CoroutineScope,
-                                                     lifecycleAwareMiddleware: List<StoreLifecycleAware<TState>> = emptyList()) {
+                                                     lifecycleAwareMiddleware: List<StoreLifecycleAware<TState>> = emptyList(),
+                                                     private val logger: Logger = Logger.default()) {
     
     private val _state = MutableStateFlow(initialState)
     private val _stateMutex = Mutex()
 
     init {
+        logger.info(initialState::class.simpleName) { "Creating KStore with initial state type: {stateType}" }
         // Notify lifecycle-aware middleware that the store has been created
         ioScope.launch {
             lifecycleAwareMiddleware.forEach { middleware ->
@@ -76,6 +82,7 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      * @param action The action to dispatch
      */
     fun dispatch(action: Action) {
+        logger.trace(action::class.simpleName) { "Dispatching action: {actionType}" }
         ioScope.launch {
             middleware(this@KStore, { a ->
                 _stateMutex.withLock {
@@ -103,7 +110,11 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      * @return The original action (for middleware chaining)
      */
     private fun applyReducer(action: Action) : Action {
-        _state.value = reducer(_state.value, action)
+        val oldState = _state.value
+        _state.value = reducer(oldState, action)
+        if (oldState !== _state.value) {
+            logger.trace(oldState::class.simpleName, _state.value::class.simpleName) { "State updated from {oldType} to {newType}" }
+        }
         return action
     }
 }
@@ -136,7 +147,7 @@ fun <TState:StateModel> createStore(initialState: TState, block: StoreBuilder<TS
 class StoreBuilder<TState:StateModel> {
     private var initialState: TState? = null
     private val middlewareBuilder = MiddlewareBuilder<TState>()
-    private var reducer: Reducer<TState> = { state, action -> state }
+    private val reducers = mutableListOf<Reducer<TState>>()
     private var ioScope: CoroutineScope = CoroutineScope(backgroundDispatcher() + SupervisorJob())
 
     val scope: CoroutineScope get() = ioScope
@@ -160,12 +171,14 @@ class StoreBuilder<TState:StateModel> {
     }
 
     /**
-     * Sets the reducer function for the store.
+     * Adds a reducer function to the store.
+     * Multiple reducers can be added and will be composed into a single reducer.
+     * Reducers are executed in the order they were added.
      *
      * @param reducer The reducer function that will process actions and update state
      */
     fun reduceWith(reducer: Reducer<TState>) {
-        this.reducer = reducer
+        reducers.add(reducer)
     }
 
     /**
@@ -178,6 +191,26 @@ class StoreBuilder<TState:StateModel> {
     }
 
     /**
+     * Composes multiple reducers into a single reducer function.
+     * The reducers are applied in sequence, with each reducer receiving
+     * the state produced by the previous reducer.
+     *
+     * @return A single composed reducer function
+     */
+    private fun composeReducers(): Reducer<TState> {
+        return when (reducers.size) {
+            0 -> { state, _ -> state } // Identity reducer if no reducers added
+            1 -> reducers[0] // Return single reducer directly for efficiency
+            else -> { state, action ->
+                // Compose reducers without iteration using fold
+                reducers.fold(state) { currentState, reducer ->
+                    reducer(currentState, action)
+                }
+            }
+        }
+    }
+
+    /**
      * Builds and returns a KStore instance with the configured options.
      *
      * @return A configured KStore instance
@@ -187,7 +220,10 @@ class StoreBuilder<TState:StateModel> {
         if (initialState == null) {
             throw IllegalStateException("Initial state must be set")
         }
-        return KStore(initialState!!, reducer, middlewareBuilder.compose(), ioScope, middlewareBuilder.lifecycleAwareMiddleware)
+        val logger = Logger.default()
+        logger.debug(middlewareBuilder.middleware.size) { "Composing {count} middleware functions" }
+        logger.debug(reducers.size) { "Composing {count} reducer functions" }
+        return KStore(initialState!!, composeReducers(), middlewareBuilder.compose(), ioScope, middlewareBuilder.lifecycleAwareMiddleware, logger)
     }
 }
 
@@ -200,23 +236,25 @@ class StoreBuilder<TState:StateModel> {
  * @param TState The type of state model used in the store
  */
 class MiddlewareBuilder<TState:StateModel> {
-    private val middleware = mutableListOf<Middleware<TState>>()
+    internal val middleware = mutableListOf<Middleware<TState>>()
     internal val lifecycleAwareMiddleware = mutableListOf<StoreLifecycleAware<TState>>()
 
     /**
      * Adds logging middleware to the chain.
      *
-     * @param log The function to use for logging (defaults to println)
+     * @param logger The logger to use for logging (defaults to Logger.default())
      */
-    fun logging(log: (String) -> Unit = ::println) {
-        middleware.add(loggerMiddleware(log))
+    fun logging(logger: Logger = Logger.default()) {
+        middleware.add(loggerMiddleware(logger))
     }
 
     /**
      * Adds exception handling middleware to the chain.
+     * 
+     * @param logger The logger to use for logging errors (defaults to Logger.default())
      */
-    fun exceptionHandling() {
-        middleware.add(exceptionMiddleware())
+    fun exceptionHandling(logger: Logger = Logger.default()) {
+        middleware.add(exceptionMiddleware(logger))
     }
 
     /**
@@ -240,18 +278,18 @@ class MiddlewareBuilder<TState:StateModel> {
      *
      * @param storage Optional storage for saga persistence. If provided, sagas will be persisted and restored automatically.
      * @param persistenceStrategy The strategy for when to persist saga state (defaults to OnEveryChange)
-     * @param logError Error logging function
+     * @param logger Logger for error logging (defaults to Logger.default())
      * @param block A configuration block for defining sagas
      */
     fun sagas(
         storage: SagaStorage? = null,
         persistenceStrategy: SagaPersistenceStrategy = SagaPersistenceStrategy.OnEveryChange,
-        logError: (String) -> Unit = ::println,
+        logger: Logger = Logger.default(),
         block: SagaRegistry<TState>.() -> Unit
     ) {
         val registry = SagaRegistry<TState>()
         block(registry)
-        val sagaMiddleware = sagaMiddleware(registry, storage, persistenceStrategy, logError)
+        val sagaMiddleware = sagaMiddleware(registry, storage, persistenceStrategy, logger)
         middleware.add(sagaMiddleware)
         
         // If the middleware is lifecycle-aware, register it
@@ -276,12 +314,14 @@ class MiddlewareBuilder<TState:StateModel> {
     fun persistence(
         storage: StateStorage<TState>,
         strategy: PersistenceStrategy = PersistenceStrategy.Debounced(500),
-        errorHandler: (Exception) -> Unit = {}
+        errorHandler: (Exception) -> Unit = {},
+        logger: Logger = Logger.default()
     ) {
         val persistenceMiddleware = PersistenceMiddleware(
             storage = storage,
             strategy = strategy,
-            errorHandler = errorHandler
+            errorHandler = errorHandler,
+            logger = logger
         )
         // Add as middleware to handle RestoreStateAction and OnAction strategies
         middleware { store, next, action ->

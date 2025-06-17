@@ -36,13 +36,11 @@ class IntegrationTest {
 
     @Test
     fun `should log actions with logger middleware integration`() = runTest {
-        val logMessages = mutableListOf<String>()
+        val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
             middleware {
-                logging({ msg ->
-                    logMessages.add(msg)
-                })
+                logging(testLogger)
             }
             reduceWith { state, action ->
                 when (action) {
@@ -54,16 +52,16 @@ class IntegrationTest {
 
         dispatchAndAdvance(store, IncrementAction(5))
 
-        assertEquals(2, logMessages.size)
-        assertTrue(logMessages[0].contains("Action: IncrementAction"))
-        assertTrue(logMessages[1].contains("After Action: IncrementAction"))
+        assertEquals(2, testLogger.messages.size)
+        assertTrue(testLogger.messages[0].contains("Action: IncrementAction"))
+        assertTrue(testLogger.messages[1].contains("After Action: IncrementAction"))
 
         assertEquals(5, store.state.value.counter)
     }
 
     @Test
     fun `should handle exceptions in integrated middleware chain`() = runTest {
-        val errorLogs = mutableListOf<String>()
+        val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
             middleware {
@@ -71,9 +69,7 @@ class IntegrationTest {
                     next(action)
                 }
 
-                middleware(exceptionMiddleware<TestState> { errorMessage ->
-                    errorLogs.add(errorMessage)
-                })
+                middleware(exceptionMiddleware<TestState>(testLogger))
             }
 
             reduceWith { state, action ->
@@ -88,12 +84,12 @@ class IntegrationTest {
         dispatchAndAdvance(store, IncrementAction(1))
 
         assertEquals(1, store.state.value.counter)
-        assertTrue(errorLogs.isEmpty())
+        assertTrue(testLogger.messages.isEmpty())
 
         dispatchAndAdvance(store, ErrorAction("Test error"))
 
-        assertTrue(errorLogs.isNotEmpty())
-        assertTrue(errorLogs.any { it.contains("Test error") })
+        assertTrue(testLogger.messages.isNotEmpty())
+        assertTrue(testLogger.messages.any { it.contains("Test error") })
     }
 
     @Test
@@ -169,14 +165,13 @@ class IntegrationTest {
 
     @Test
     fun `should integrate all middleware types together`() = runTest {
-        val logs = mutableListOf<String>()
-        val errors = mutableListOf<String>()
+        val testLogger = TestLogger()
         val testCache = TestActionCache()
 
         val store = createStoreForTest(TestState()) {
             middleware {
-                middleware(loggerMiddleware<TestState> { logs.add(it) })
-                middleware(exceptionMiddleware<TestState> { errors.add(it) })
+                middleware(loggerMiddleware<TestState>(testLogger))
+                middleware(exceptionMiddleware<TestState>(testLogger))
                 caching(testCache)
             }
 
@@ -207,7 +202,7 @@ class IntegrationTest {
         dispatchAndAdvance(store, IncrementAction(2))
 
         assertEquals(2, store.state.value.counter, "Counter should be 2")
-        assertTrue(logs.any { it.contains("Action: IncrementAction") }, "Logger should log action")
+        assertTrue(testLogger.messages.any { it.contains("Action: IncrementAction") }, "Logger should log action")
 
         val asyncAction = TestAsyncAction(1, 3)
         dispatchAndAdvance(store, AsyncProcessing(asyncAction))
@@ -218,10 +213,10 @@ class IntegrationTest {
         assertEquals(8, store.state.value.counter, "Counter should be 2 + 6 = 8")
         assertEquals(1, store.state.value.messages.size, "Should have one message")
 
-        errors.clear()
+        testLogger.messages.clear()
         dispatchAndAdvance(store, ErrorAction("Integration error"))
 
-        assertTrue(errors.isNotEmpty(), "Error should be caught by exception middleware")
+        assertTrue(testLogger.messages.isNotEmpty(), "Error should be caught by exception middleware")
         assertEquals(8, store.state.value.counter, "Counter should remain unchanged after error")
 
         dispatchAndAdvance(store, IncrementAction(10))
