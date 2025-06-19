@@ -3,6 +3,7 @@ package duks.storage
 import duks.*
 import kotlin.test.*
 import kotlinx.coroutines.test.*
+import kotlin.time.Duration.Companion.seconds
 
 data class CounterState(val count: Int = 0) : StateModel
 
@@ -19,7 +20,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun `should persist state directly to storage`() = runTest {
+    fun `should persist state directly to storage`() = runTest(timeout = 5.seconds) {
         // Direct state storage
         val storage = InMemoryStorage<CounterState>()
         
@@ -34,10 +35,18 @@ class GenericPersistenceIntegrationTest {
             }
         }
         
+        // Let the persistence middleware initialize
+        runCurrent()
+        advanceUntilIdle()
+        
         // Dispatch actions
         store.dispatch(IncrementAction)
         store.dispatch(IncrementAction)
+        runCurrent()
         advanceUntilIdle()
+        
+        // Verify state changed
+        assertEquals(2, store.state.value.count)
         
         // Verify state was persisted
         val savedData = storage.load()
@@ -55,6 +64,7 @@ class GenericPersistenceIntegrationTest {
             }
         }
         
+        runCurrent()
         advanceUntilIdle()
         
         // State should be restored
@@ -62,7 +72,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun `should persist state when set action is dispatched`() = runTest {
+    fun `should persist state when set action is dispatched`() = runTest(timeout = 5.seconds) {
         // Storage that saves state directly
         val storage = InMemoryStorage<CounterState>()
         
@@ -77,6 +87,7 @@ class GenericPersistenceIntegrationTest {
         }
         
         store.dispatch(SetCountAction(42))
+        runCurrent()
         advanceUntilIdle()
         
         // State is stored directly
@@ -86,7 +97,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun `should debounce state persistence with configured delay`() = runTest {
+    fun `should debounce state persistence with configured delay`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {
@@ -118,7 +129,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun `should persist state conditionally based on custom logic`() = runTest {
+    fun `should persist state conditionally based on custom logic`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {
@@ -136,11 +147,13 @@ class GenericPersistenceIntegrationTest {
         
         // Dispatch to odd number - should not persist
         store.dispatch(IncrementAction)
+        runCurrent()
         advanceUntilIdle()
         assertNull(storage.load())
         
         // Dispatch to even number - should persist
         store.dispatch(IncrementAction)
+        runCurrent()
         advanceUntilIdle()
         
         val saved = storage.load()
@@ -149,7 +162,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun `should persist state only on specific actions`() = runTest {
+    fun `should persist state only on specific actions`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {
@@ -164,11 +177,13 @@ class GenericPersistenceIntegrationTest {
         
         // Increment should not trigger persistence
         store.dispatch(IncrementAction)
+        runCurrent()
         advanceUntilIdle()
         assertNull(storage.load())
         
         // SetCountAction should trigger persistence
         store.dispatch(SetCountAction(10))
+        runCurrent()
         advanceUntilIdle()
         
         val saved = storage.load()
@@ -177,7 +192,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun `should restore state from storage on store creation`() = runTest {
+    fun `should restore state from storage on store creation`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<CounterState>()
         
         // Pre-save state
@@ -195,6 +210,7 @@ class GenericPersistenceIntegrationTest {
         }
         
         // Wait for restoration
+        runCurrent()
         advanceUntilIdle()
         
         // State should be restored
@@ -202,7 +218,7 @@ class GenericPersistenceIntegrationTest {
     }
     
     @Test
-    fun `should handle persistence errors gracefully`() = runTest {
+    fun `should handle persistence errors gracefully`() = runTest(timeout = 5.seconds) {
         // Storage that throws errors
         val storage = object : StateStorage<CounterState> {
             private var shouldFail = true
@@ -234,17 +250,19 @@ class GenericPersistenceIntegrationTest {
         
         // First save should fail
         store.dispatch(IncrementAction)
+        runCurrent()
         advanceUntilIdle()
         assertEquals(1, errorCount)
         
         // Second save should succeed
         store.dispatch(IncrementAction)
+        runCurrent()
         advanceUntilIdle()
         assertEquals(1, errorCount) // No new errors
     }
     
     @Test
-    fun `should support combined persistence strategies`() = runTest {
+    fun `should support combined persistence strategies`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<CounterState>()
         
         val store = createStoreForTest(initialState = CounterState(0)) {
@@ -264,11 +282,13 @@ class GenericPersistenceIntegrationTest {
         
         // Increment to 5 - should not persist (condition not met)
         repeat(5) { store.dispatch(IncrementAction) }
+        runCurrent()
         advanceUntilIdle()
         assertNull(storage.load())
         
         // SetCountAction to 8 - should persist (action matches)
         store.dispatch(SetCountAction(8))
+        runCurrent()
         advanceUntilIdle()
         assertNotNull(storage.load())
         assertEquals(8, storage.load()?.count)
@@ -277,6 +297,7 @@ class GenericPersistenceIntegrationTest {
         storage.clear()
         store.dispatch(SetCountAction(9))
         store.dispatch(IncrementAction)
+        runCurrent()
         advanceUntilIdle()
         assertNotNull(storage.load())
         assertEquals(10, storage.load()?.count)

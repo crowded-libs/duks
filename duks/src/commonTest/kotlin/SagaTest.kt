@@ -2,6 +2,7 @@ package duks
 
 import kotlin.test.*
 import kotlinx.coroutines.test.*
+import kotlinx.coroutines.test.runCurrent
 import kotlin.time.Duration.Companion.seconds
 
 class SagaTest {
@@ -307,6 +308,10 @@ class SagaTest {
         // Test sequential effects
         dispatchAndAdvance(store, TriggerAction("sequential"))
         
+        // Give saga effects time to complete
+        advanceTimeBy(200)
+        runCurrent()
+        
         assertTrue(effectsExecuted.contains("saga-start:sequential"))
         assertTrue(effectsExecuted.contains("dispatch:step-1"))
         assertTrue(effectsExecuted.contains("dispatch:step-2"))
@@ -378,6 +383,10 @@ class SagaTest {
         }
         
         dispatchAndAdvance(store, StartParent("test-parent"))
+        
+        // Give sagas time to complete their effects
+        advanceTimeBy(200)
+        runCurrent()
         
         assertTrue(sagaEvents.contains("parent-started:test-parent"))
         assertTrue(sagaEvents.contains("child-started:test-parent"))

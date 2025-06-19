@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 class AsyncTest {
 
@@ -36,7 +37,7 @@ class AsyncTest {
     }
 
     @Test
-    fun `should handle failing async actions correctly using asyncMiddleware`() = runTest {
+    fun `should handle failing async actions correctly using asyncMiddleware`() = runTest(timeout = 5.seconds) {
 
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
@@ -105,7 +106,7 @@ class AsyncTest {
     }
 
     @Test
-    fun `should process successful async actions using asyncMiddleware`() = runTest {
+    fun `should process successful async actions using asyncMiddleware`() = runTest(timeout = 5.seconds) {
 
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
@@ -188,7 +189,7 @@ class AsyncTest {
     }
 
     @Test
-    fun `should handle multiple async actions sequentially using asyncMiddleware`() = runTest {
+    fun `should handle multiple async actions sequentially using asyncMiddleware`() = runTest(timeout = 5.seconds) {
 
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
@@ -329,7 +330,7 @@ class AsyncTest {
     }
 
     @Test
-    fun `should support custom async action interfaces with specific types`() = runTest {
+    fun `should support custom async action interfaces with specific types`() = runTest(timeout = 5.seconds) {
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 async()
@@ -435,7 +436,7 @@ class AsyncTest {
     }
 
     @Test
-    fun `should support overriding create methods within an action`() = runTest {
+    fun `should support overriding create methods within an action`() = runTest(timeout = 5.seconds) {
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 async()
@@ -517,7 +518,7 @@ class AsyncTest {
     }
 
     @Test
-    fun `should handle custom async flow actions with progress updates`() = runTest {
+    fun `should handle custom async flow actions with progress updates`() = runTest(timeout = 5.seconds) {
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 async()

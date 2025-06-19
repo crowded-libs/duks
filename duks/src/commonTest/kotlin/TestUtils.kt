@@ -51,8 +51,8 @@ fun <TState : StateModel> TestScope.createStoreForTest(
     block: StoreBuilder<TState>.() -> Unit
 ): KStore<TState> {
     return createStore(initialState) {
-        // Use the test scope to ensure coroutines are synchronized with tests
-        scope(this@createStoreForTest)
+        // Use the backgroundScope for long-running coroutines that should be cancelled when test ends
+        scope(this@createStoreForTest.backgroundScope)
         
         block()
     }

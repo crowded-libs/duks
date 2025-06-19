@@ -6,6 +6,7 @@ import kotlinx.datetime.Instant
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.plus
 import kotlinx.coroutines.test.*
+import kotlin.time.Duration.Companion.seconds
 
 class MapActionCacheTest {
     
@@ -16,7 +17,7 @@ class MapActionCacheTest {
     data class TestResultAction(val id: Int) : Action
 
     @Test
-    fun `should perform basic cache operations correctly`() = runTest {
+    fun `should perform basic cache operations correctly`() = runTest(timeout = 5.seconds) {
         val cache = MapActionCache()
         val action = TestCacheableAction(1)
         val resultAction = TestResultAction(1)
@@ -37,7 +38,7 @@ class MapActionCacheTest {
     }
     
     @Test
-    fun `should overwrite existing cache entries`() = runTest {
+    fun `should overwrite existing cache entries`() = runTest(timeout = 5.seconds) {
         val cache = MapActionCache()
         val action = TestCacheableAction(2)
         
@@ -60,7 +61,7 @@ class MapActionCacheTest {
     }
     
     @Test
-    fun `should handle multiple actions independently`() = runTest {
+    fun `should handle multiple actions independently`() = runTest(timeout = 5.seconds) {
         val cache = MapActionCache()
         
         val action1 = TestCacheableAction(1)
@@ -88,7 +89,7 @@ class MapActionCacheTest {
     }
     
     @Test
-    fun `should handle expired cache entries properly`() = runTest {
+    fun `should handle expired cache entries properly`() = runTest(timeout = 5.seconds) {
         val cache = MapActionCache()
         
         val action = object : Action, CacheableAction {

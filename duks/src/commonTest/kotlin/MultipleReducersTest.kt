@@ -2,6 +2,8 @@ package duks
 
 import kotlin.test.*
 import kotlinx.coroutines.test.*
+import kotlinx.coroutines.test.runCurrent
+import kotlin.time.Duration.Companion.seconds
 
 class MultipleReducersTest {
 
@@ -21,7 +23,7 @@ class MultipleReducersTest {
     object ResetAction : Action
 
     @Test
-    fun `should support single reducer for backwards compatibility`() = runTest {
+    fun `should support single reducer for backwards compatibility`() = runTest(timeout = 5.seconds) {
         val store = createStoreForTest(TestState()) {
             reduceWith { state, action ->
                 when (action) {
@@ -33,16 +35,18 @@ class MultipleReducersTest {
         }
 
         store.dispatch(IncrementAction(5))
+        runCurrent()
         advanceUntilIdle()
         assertEquals(5, store.state.value.counter)
 
         store.dispatch(SetTextAction("Hello"))
+        runCurrent()
         advanceUntilIdle()
         assertEquals("Hello", store.state.value.text)
     }
 
     @Test
-    fun `should compose multiple reducers in order`() = runTest {
+    fun `should compose multiple reducers in order`() = runTest(timeout = 5.seconds) {
         val store = createStoreForTest(TestState()) {
             // First reducer handles counter
             reduceWith { state, action ->
@@ -70,20 +74,23 @@ class MultipleReducersTest {
         }
 
         store.dispatch(IncrementAction(3))
+        runCurrent()
         advanceUntilIdle()
         assertEquals(3, store.state.value.counter)
 
         store.dispatch(SetTextAction("Test"))
+        runCurrent()
         advanceUntilIdle()
         assertEquals("Test", store.state.value.text)
 
         store.dispatch(AddItemAction("Item1"))
+        runCurrent()
         advanceUntilIdle()
         assertEquals(listOf("Item1"), store.state.value.items)
     }
 
     @Test
-    fun `should allow reducers to see changes from previous reducers`() = runTest {
+    fun `should allow reducers to see changes from previous reducers`() = runTest(timeout = 5.seconds) {
         val store = createStoreForTest(TestState()) {
             // First reducer sets counter
             reduceWith { state, action ->
@@ -103,13 +110,14 @@ class MultipleReducersTest {
         }
 
         store.dispatch(IncrementAction(5))
+        runCurrent()
         advanceUntilIdle()
         assertEquals(5, store.state.value.counter)
         assertEquals("Counter is now: 5", store.state.value.text)
     }
 
     @Test
-    fun `should handle reset action across multiple reducers`() = runTest {
+    fun `should handle reset action across multiple reducers`() = runTest(timeout = 5.seconds) {
         val store = createStoreForTest(TestState(counter = 10, text = "Hello", items = listOf("A", "B"))) {
             // Each reducer handles reset for its domain
             reduceWith { state, action ->
@@ -144,6 +152,7 @@ class MultipleReducersTest {
 
         // Reset everything
         store.dispatch(ResetAction)
+        runCurrent()
         advanceUntilIdle()
         assertEquals(0, store.state.value.counter)
         assertEquals("", store.state.value.text)
@@ -151,7 +160,7 @@ class MultipleReducersTest {
     }
 
     @Test
-    fun `should work with no reducers`() = runTest {
+    fun `should work with no reducers`() = runTest(timeout = 5.seconds) {
         val initialState = TestState(counter = 42, text = "Initial")
         val store = createStoreForTest(initialState) {
             // No reducers added
@@ -160,13 +169,14 @@ class MultipleReducersTest {
         // Dispatch actions - state should remain unchanged
         store.dispatch(IncrementAction(5))
         store.dispatch(SetTextAction("Changed"))
+        runCurrent()
         advanceUntilIdle()
 
         assertEquals(initialState, store.state.value)
     }
 
     @Test
-    fun `should allow modular reducer composition`() = runTest {
+    fun `should allow modular reducer composition`() = runTest(timeout = 5.seconds) {
         // Define modular reducers
         val counterReducer: Reducer<TestState> = { state, action ->
             when (action) {
@@ -198,25 +208,29 @@ class MultipleReducersTest {
 
         // Test all reducers work independently
         store.dispatch(IncrementAction(1))
+        runCurrent()
         advanceUntilIdle()
         assertEquals(1, store.state.value.counter)
 
         store.dispatch(SetTextAction("Modular"))
+        runCurrent()
         advanceUntilIdle()
         assertEquals("Modular", store.state.value.text)
 
         store.dispatch(SetFlagAction("feature1"))
         store.dispatch(SetFlagAction("feature2"))
+        runCurrent()
         advanceUntilIdle()
         assertEquals(setOf("feature1", "feature2"), store.state.value.flags)
 
         store.dispatch(ClearFlagAction("feature1"))
+        runCurrent()
         advanceUntilIdle()
         assertEquals(setOf("feature2"), store.state.value.flags)
     }
 
     @Test
-    fun `should preserve order of execution for reducers`() = runTest {
+    fun `should preserve order of execution for reducers`() = runTest(timeout = 5.seconds) {
         val executionOrder = mutableListOf<String>()
 
         val store = createStoreForTest(TestState()) {
@@ -243,13 +257,14 @@ class MultipleReducersTest {
         }
 
         store.dispatch(IncrementAction())
+        runCurrent()
         advanceUntilIdle()
 
         assertEquals(listOf("reducer1", "reducer2", "reducer3"), executionOrder)
     }
 
     @Test
-    fun `should allow middleware and plugins to add their own reducers`() = runTest {
+    fun `should allow middleware and plugins to add their own reducers`() = runTest(timeout = 5.seconds) {
         // Simulate a plugin that tracks action history
         data class HistoryState(
             val baseState: TestState = TestState(),
@@ -283,6 +298,7 @@ class MultipleReducersTest {
         store.dispatch(IncrementAction(5))
         store.dispatch(SetTextAction("Hello"))
         store.dispatch(IncrementAction(3))
+        runCurrent()
         advanceUntilIdle()
 
         val finalState = store.state.value

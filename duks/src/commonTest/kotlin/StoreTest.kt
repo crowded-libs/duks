@@ -1,8 +1,10 @@
 package duks
 
-import kotlin.test.*
-import kotlinx.coroutines.*
-import kotlinx.coroutines.test.*
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 class StoreTest {
 
@@ -18,7 +20,7 @@ class StoreTest {
     class ErrorAction(val message: String = "Test error") : Action
 
     @Test
-    fun `should create store with initial state`() = runTest {
+    fun `should create store with initial state`() = runTest(timeout = 5.seconds) {
         val store = createStoreForTest(TestState()) {
             reduceWith { state, action ->
                 when (action) {
@@ -51,7 +53,7 @@ class StoreTest {
     }
 
     @Test
-    fun `should update state when dispatching actions`() = runTest {
+    fun `should update state when dispatching actions`() = runTest(timeout = 5.seconds) {
         val store = createStoreForTest(TestState()) {
             reduceWith { state, action ->
                 when (action) {
@@ -68,7 +70,7 @@ class StoreTest {
     }
 
     @Test
-    fun `should track actions processed by the store`() = runTest {
+    fun `should track actions processed by the store`() = runTest(timeout = 5.seconds) {
         val initialState = TestState()
 
         val (store, actionsProcessed) = createTrackedStoreForTest(initialState) {
@@ -95,7 +97,7 @@ class StoreTest {
     }
 
     @Test
-    fun `should execute middleware before and after actions`() = runTest {
+    fun `should execute middleware before and after actions`() = runTest(timeout = 5.seconds) {
         val initialState = TestState()
         val actionsProcessed = mutableListOf<String>()
 
@@ -119,7 +121,7 @@ class StoreTest {
     }
 
     @Test
-    fun `should update multiple state properties correctly`() = runTest {
+    fun `should update multiple state properties correctly`() = runTest(timeout = 5.seconds) {
         val initialState = TestState()
         val store = createStoreForTest(initialState) {
             reduceWith { state, action ->
@@ -141,7 +143,7 @@ class StoreTest {
     }
 
     @Test
-    fun `should log actions with logger middleware`() = runTest {
+    fun `should log actions with logger middleware`() = runTest(timeout = 5.seconds) {
         val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
@@ -164,7 +166,7 @@ class StoreTest {
     }
 
     @Test
-    fun `should handle exceptions with exception middleware`() = runTest {
+    fun `should handle exceptions with exception middleware`() = runTest(timeout = 5.seconds) {
         val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
@@ -191,7 +193,7 @@ class StoreTest {
     }
 
     @Test
-    fun `should trigger saga-like side effects after actions`() = runTest {
+    fun `should trigger saga-like side effects after actions`() = runTest(timeout = 5.seconds) {
         val (store, processedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 middleware({ store, next, action ->

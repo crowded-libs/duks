@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.*
 import kotlinx.serialization.Serializable
 import kotlin.test.*
 import kotlin.test.Ignore
+import kotlin.time.Duration.Companion.seconds
 
 class PersistenceTest {
     
@@ -39,7 +40,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should save and load state with JSON file storage`() = runTest {
+    fun `should save and load state with JSON file storage`() = runTest(timeout = 5.seconds) {
         val storage = createJsonFileStorage<TestState>("test.json")
         
         val testState = TestState(
@@ -125,7 +126,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should debounce state persistence`() = runTest {
+    fun `should debounce state persistence`() = runTest(timeout = 5.seconds) {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -173,7 +174,7 @@ class PersistenceTest {
     
     @Test
     @Ignore  // Throttled persistence uses real time, not test time
-    fun `should throttle state persistence`() = runTest {
+    fun `should throttle state persistence`() = runTest(timeout = 5.seconds) {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -224,7 +225,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should persist state only on specific actions`() = runTest {
+    fun `should persist state only on specific actions`() = runTest(timeout = 5.seconds) {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -258,7 +259,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should persist state conditionally`() = runTest {
+    fun `should persist state conditionally`() = runTest(timeout = 5.seconds) {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -310,7 +311,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should support combined persistence strategies`() = runTest {
+    fun `should support combined persistence strategies`() = runTest(timeout = 5.seconds) {
         val inMemoryStorage = InMemoryStorage<TestState>()
         val testableStorage = inMemoryStorage.testable()
         
@@ -346,7 +347,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should restore state from storage`() = runTest {
+    fun `should restore state from storage`() = runTest(timeout = 5.seconds) {
         val fileStorage = createJsonFileStorage<TestState>("restore.json")
         val testableStorage = fileStorage.testable()
 
@@ -395,7 +396,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should handle persistence errors gracefully`() = runTest {
+    fun `should handle persistence errors gracefully`() = runTest(timeout = 5.seconds) {
         val errors = mutableListOf<Exception>()
         val failingStorage = object : StateStorage<TestState> {
             override suspend fun save(state: TestState) {
@@ -431,7 +432,7 @@ class PersistenceTest {
     }
     
     @Test
-    fun `should save to multiple storages with composite storage`() = runTest {
+    fun `should save to multiple storages with composite storage`() = runTest(timeout = 5.seconds) {
         val storage1 = createJsonFileStorage<TestState>("composite1.json")
         val storage2 = createJsonFileStorage<TestState>("composite2.json")
         val composite = CompositeStorage(listOf(storage1, storage2))

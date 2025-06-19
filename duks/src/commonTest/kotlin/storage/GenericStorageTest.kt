@@ -3,12 +3,13 @@ package duks.storage
 import duks.*
 import kotlin.test.*
 import kotlinx.coroutines.test.*
+import kotlin.time.Duration.Companion.seconds
 
 data class TestState(val value: String) : StateModel
 
 class GenericStorageTest {
     @Test
-    fun `should save and load state with in-memory storage`() = runTest {
+    fun `should save and load state with in-memory storage`() = runTest(timeout = 5.seconds) {
         // Create storage that works directly with state
         val storage = InMemoryStorage<TestState>()
         
@@ -28,7 +29,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun `should work with different state types`() = runTest {
+    fun `should work with different state types`() = runTest(timeout = 5.seconds) {
         // Test with different state types
         data class UserState(val name: String, val age: Int) : StateModel
         
@@ -44,7 +45,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun `should save to multiple storages with composite storage`() = runTest {
+    fun `should save to multiple storages with composite storage`() = runTest(timeout = 5.seconds) {
         // Test composite storage that saves to multiple storages
         val storage1 = InMemoryStorage<TestState>()
         val storage2 = InMemoryStorage<TestState>()
@@ -71,7 +72,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun `should handle failures gracefully in composite storage`() = runTest {
+    fun `should handle failures gracefully in composite storage`() = runTest(timeout = 5.seconds) {
         // Test composite storage when one storage fails
         val workingStorage = InMemoryStorage<TestState>()
         val failingStorage = object : StateStorage<TestState> {
@@ -114,7 +115,7 @@ class GenericStorageTest {
     }
     
     @Test
-    fun `should maintain state isolation between saves`() = runTest {
+    fun `should maintain state isolation between saves`() = runTest(timeout = 5.seconds) {
         // Ensure storage maintains state isolation
         val storage = InMemoryStorage<TestState>()
         

@@ -3,9 +3,11 @@ package org.ducks.storage
 import duks.*
 import duks.storage.InMemoryStorage
 import duks.storage.PersistenceStrategy
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.test.*
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 class BasicPersistenceTest {
     
@@ -21,7 +23,7 @@ class BasicPersistenceTest {
     }
     
     @Test
-    fun `should perform basic operations with in-memory storage`() = runTest {
+    fun `should perform basic operations with in-memory storage`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<TestState>()
         
         assertFalse(storage.exists())
@@ -38,7 +40,7 @@ class BasicPersistenceTest {
     }
     
     @Test
-    fun `should persist state changes with persistence middleware`() = runTest {
+    fun `should persist state changes with persistence middleware`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<TestState>()
 
         val store = createStoreForTest(initialState = TestState(0)) {
@@ -60,7 +62,7 @@ class BasicPersistenceTest {
     }
     
     @Test
-    fun `should restore state from storage on store creation`() = runTest {
+    fun `should restore state from storage on store creation`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<TestState>()
 
         // Pre-save state

@@ -28,7 +28,7 @@ class MiddlewareTest {
     data class SimpleAction(val value: String) : Action
 
     @Test
-    fun `should execute middleware and update state`() = runTest {
+    fun `should execute middleware and update state`() = runTest(timeout = 5.seconds) {
         val middlewareCalled = mutableListOf<String>()
         
         val loggingMiddleware = createTracingMiddleware<TestState>(middlewareCalled, "logging")
@@ -53,7 +53,7 @@ class MiddlewareTest {
     }
     
     @Test
-    fun `should capture logs before and after action`() = runTest {
+    fun `should capture logs before and after action`() = runTest(timeout = 5.seconds) {
         val logs = mutableListOf<String>()
         
         val loggingMiddleware: Middleware<TestState> = { store, next, action ->
@@ -88,7 +88,7 @@ class MiddlewareTest {
     }
     
     @Test
-    fun `should execute middleware in correct order and sequence`() = runTest {
+    fun `should execute middleware in correct order and sequence`() = runTest(timeout = 5.seconds) {
         val logs = mutableListOf<String>()
         val middlewareExecutionOrder = mutableListOf<String>()
         
@@ -133,7 +133,7 @@ class MiddlewareTest {
     }
     
     @Test
-    fun `should catch exceptions from reducer`() = runTest {
+    fun `should catch exceptions from reducer`() = runTest(timeout = 5.seconds) {
         val initialState = TestState()
         
         val reducer: Reducer<TestState> = { state, action ->
@@ -161,7 +161,7 @@ class MiddlewareTest {
     }
     
     @Test
-    fun `should catch exceptions thrown by middleware`() = runTest {
+    fun `should catch exceptions thrown by middleware`() = runTest(timeout = 5.seconds) {
         val initialState = TestState()
         val actionsProcessed = mutableListOf<String>()
         
@@ -194,6 +194,7 @@ class MiddlewareTest {
         actionsProcessed.clear()
         store.dispatch(ErrorAction("Test error in middleware"))
 
+        runCurrent()
         advanceUntilIdle()
 
         assertEquals(3, actionsProcessed.size)
@@ -204,6 +205,7 @@ class MiddlewareTest {
         actionsProcessed.clear()
         store.dispatch(IncrementAction(3))
 
+        runCurrent()
         advanceUntilIdle()
 
         assertEquals(4, actionsProcessed.size)

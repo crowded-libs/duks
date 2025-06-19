@@ -5,6 +5,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 class IntegrationTest {
 
@@ -35,7 +36,7 @@ class IntegrationTest {
     }
 
     @Test
-    fun `should log actions with logger middleware integration`() = runTest {
+    fun `should log actions with logger middleware integration`() = runTest(timeout = 5.seconds) {
         val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
@@ -60,7 +61,7 @@ class IntegrationTest {
     }
 
     @Test
-    fun `should handle exceptions in integrated middleware chain`() = runTest {
+    fun `should handle exceptions in integrated middleware chain`() = runTest(timeout = 5.seconds) {
         val testLogger = TestLogger()
 
         val store = createStoreForTest(TestState()) {
@@ -93,7 +94,7 @@ class IntegrationTest {
     }
 
     @Test
-    fun `should integrate async actions with saga-like effects`() = runTest {
+    fun `should integrate async actions with saga-like effects`() = runTest(timeout = 5.seconds) {
         val store = createStoreForTest(TestState()) {
             reduceWith { state, action ->
                 when (action) {
@@ -164,7 +165,7 @@ class IntegrationTest {
     }
 
     @Test
-    fun `should integrate all middleware types together`() = runTest {
+    fun `should integrate all middleware types together`() = runTest(timeout = 5.seconds) {
         val testLogger = TestLogger()
         val testCache = TestActionCache()
 

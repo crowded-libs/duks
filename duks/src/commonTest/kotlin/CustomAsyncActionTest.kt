@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 class CustomAsyncActionTest {
 
@@ -66,7 +67,7 @@ class CustomAsyncActionTest {
     }
 
     @Test
-    fun `should support custom action creation methods`() = runTest {
+    fun `should support custom action creation methods`() = runTest(timeout = 5.seconds) {
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 async()
@@ -154,7 +155,7 @@ class CustomAsyncActionTest {
     }
 
     @Test
-    fun `should support typed result async actions`() = runTest {
+    fun `should support typed result async actions`() = runTest(timeout = 5.seconds) {
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 async()
@@ -214,7 +215,7 @@ class CustomAsyncActionTest {
     }
 
     @Test
-    fun `should support custom error handling`() = runTest {
+    fun `should support custom error handling`() = runTest(timeout = 5.seconds) {
         val (store, dispatchedActions) = createTrackedStoreForTest(TestState()) {
             middleware {
                 async()

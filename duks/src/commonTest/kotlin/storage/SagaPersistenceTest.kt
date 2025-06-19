@@ -1,11 +1,13 @@
 package duks.storage
 
 import duks.*
-import kotlin.test.*
-import kotlinx.coroutines.test.*
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
+import kotlin.test.*
+import kotlin.time.Duration.Companion.seconds
 
 class SagaPersistenceTest {
     
@@ -48,7 +50,7 @@ class SagaPersistenceTest {
     }
     
     @Test
-    fun `should persist and restore saga instances`() = runTest {
+    fun `should persist and restore saga instances`() = runTest(timeout = 5.seconds) {
         // Create in-memory storage
         val sagaStorage = InMemorySagaStorage()
         
@@ -137,7 +139,7 @@ class SagaPersistenceTest {
     }
     
     @Test
-    fun `should restore sagas on store initialization`() = runTest {
+    fun `should restore sagas on store initialization`() = runTest(timeout = 5.seconds) {
         // Create storage with serializer
         val storageMap = mutableMapOf<String, InMemoryStorage<PersistedSagaInstance>>()
         val keysStorage = InMemoryStorage<Set<String>>()
@@ -263,7 +265,7 @@ class SagaPersistenceTest {
     }
     
     @Test
-    fun `should support different persistence strategies`() = runTest {
+    fun `should support different persistence strategies`() = runTest(timeout = 5.seconds) {
         // Test that different persistence strategies can be configured
         val sagaStorage = InMemorySagaStorage()
         
