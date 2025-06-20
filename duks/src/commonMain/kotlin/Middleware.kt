@@ -38,6 +38,41 @@ interface StoreLifecycleAware<TState : StateModel> {
      * @param store The newly created store instance
      */
     suspend fun onStoreCreated(store: KStore<TState>)
+    
+    /**
+     * Called when the store is being destroyed.
+     * 
+     * This method allows middleware to clean up resources, cancel background
+     * jobs, and perform any necessary cleanup operations.
+     * 
+     * Default implementation does nothing.
+     */
+    suspend fun onStoreDestroyed() {}
+    
+    /**
+     * Called when storage restoration begins.
+     * 
+     * This method is invoked when persistence middleware starts loading
+     * stored state from storage. Middleware can use this to defer their
+     * initialization or adjust their behavior during restoration.
+     * 
+     * Default implementation does nothing.
+     */
+    suspend fun onStorageRestorationStarted() {}
+    
+    /**
+     * Called when storage restoration completes.
+     * 
+     * This method is invoked after persistence middleware finishes attempting
+     * to restore state from storage. The restored parameter indicates whether
+     * state was actually restored or if the store is using its initial state.
+     * 
+     * @param restored true if state was successfully restored from storage,
+     *                 false if no stored state was found or restoration failed
+     * 
+     * Default implementation does nothing.
+     */
+    suspend fun onStorageRestorationCompleted(restored: Boolean) {}
 }
 
 /**

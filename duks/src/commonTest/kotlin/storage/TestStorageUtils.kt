@@ -1,9 +1,10 @@
 package duks.storage
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 
 data class TestStorageState(val saveCount: Int = 0, val loadCount: Int = 0)
 /**
@@ -64,5 +65,14 @@ suspend fun <TState> TestScope.waitForSave(
 ) {
     val saveCountBefore = storage.state.value.saveCount
     block()
-    storage.state.first { it.saveCount > saveCountBefore }
+    var attempts = 0
+    while (storage.state.value.saveCount == saveCountBefore && attempts < 500) {
+        delay(10)
+        runCurrent()
+        attempts++
+    }
+    
+    if (storage.state.value.saveCount == saveCountBefore) {
+        throw AssertionError("Storage save did not complete within timeout")
+    }
 }

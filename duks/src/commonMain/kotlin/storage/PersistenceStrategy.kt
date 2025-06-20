@@ -20,12 +20,6 @@ sealed class PersistenceStrategy {
     data class Debounced(val delayMs: Long) : PersistenceStrategy()
     
     /**
-     * Persist at most once per interval
-     * @param intervalMs The minimum interval between persists in milliseconds
-     */
-    data class Throttled(val intervalMs: Long) : PersistenceStrategy()
-    
-    /**
      * Persist only when specific actions are dispatched
      * @param actionTypes The set of action types that trigger persistence
      */

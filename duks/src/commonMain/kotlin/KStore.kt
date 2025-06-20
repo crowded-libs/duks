@@ -6,9 +6,7 @@ import duks.storage.StateStorage
 import duks.storage.SagaStorage
 import duks.storage.SagaPersistenceStrategy
 import duks.logging.Logger
-import duks.logging.debug
-import duks.logging.info
-import duks.logging.trace
+import duks.logging.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -48,7 +46,7 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
                                                      private val reducer: Reducer<TState>,
                                                      private val middleware: Middleware<TState>,
                                                      internal val ioScope: CoroutineScope,
-                                                     lifecycleAwareMiddleware: List<StoreLifecycleAware<TState>> = emptyList(),
+                                                     private val lifecycleAwareMiddleware: List<StoreLifecycleAware<TState>> = emptyList(),
                                                      private val logger: Logger = Logger.default()) {
     
     private val _state = MutableStateFlow(initialState)
@@ -60,6 +58,36 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
         ioScope.launch {
             lifecycleAwareMiddleware.forEach { middleware ->
                 middleware.onStoreCreated(this@KStore)
+            }
+        }
+    }
+    
+    /**
+     * Notifies all lifecycle-aware middleware that storage restoration has started.
+     * This method should only be called by persistence middleware.
+     */
+    internal suspend fun notifyStorageRestorationStarted() {
+        lifecycleAwareMiddleware.forEach { middleware ->
+            try {
+                middleware.onStorageRestorationStarted()
+            } catch (e: Exception) {
+                logger.error(e) { "Error notifying middleware of storage restoration start" }
+            }
+        }
+    }
+    
+    /**
+     * Notifies all lifecycle-aware middleware that storage restoration has completed.
+     * This method should only be called by persistence middleware.
+     * 
+     * @param restored true if state was successfully restored from storage
+     */
+    internal suspend fun notifyStorageRestorationCompleted(restored: Boolean) {
+        lifecycleAwareMiddleware.forEach { middleware ->
+            try {
+                middleware.onStorageRestorationCompleted(restored)
+            } catch (e: Exception) {
+                logger.error(e) { "Error notifying middleware of storage restoration completion" }
             }
         }
     }
@@ -111,7 +139,17 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      */
     private fun applyReducer(action: Action) : Action {
         val oldState = _state.value
-        _state.value = reducer(oldState, action)
+        
+        // Handle RestoreStateAction directly in the store to ensure state restoration
+        // works even if the app's reducer doesn't handle it
+        _state.value = when (action) {
+            is RestoreStateAction<*> -> {
+                @Suppress("UNCHECKED_CAST")
+                action.state as TState
+            }
+            else -> reducer(oldState, action)
+        }
+        
         if (oldState !== _state.value) {
             logger.trace(oldState::class.simpleName, _state.value::class.simpleName) { "State updated from {oldType} to {newType}" }
         }
@@ -223,6 +261,7 @@ class StoreBuilder<TState:StateModel> {
         val logger = Logger.default()
         logger.debug(middlewareBuilder.middleware.size) { "Composing {count} middleware functions" }
         logger.debug(reducers.size) { "Composing {count} reducer functions" }
+        logger.debug(middlewareBuilder.lifecycleAwareMiddleware.size) { "Registered {count} lifecycle-aware middleware" }
         return KStore(initialState!!, composeReducers(), middlewareBuilder.compose(), ioScope, middlewareBuilder.lifecycleAwareMiddleware, logger)
     }
 }
@@ -328,36 +367,27 @@ class MiddlewareBuilder<TState:StateModel> {
             // Special handling for RestoreStateAction
             if (action is RestoreStateAction<*>) {
                 // Pass it through to let the reducer handle it
-                next(action)
-                action
+                val result = next(action)
+                // Update the previous state to match restored state to prevent re-saving
+                @Suppress("UNCHECKED_CAST")
+                persistenceMiddleware.previousState = action.state as TState
+                // Now we can mark as initialized after restore is processed
+                persistenceMiddleware.markInitialized()
+                result
             } else {
+                // Mark as initialized on first real action (after restoration is complete)
+                persistenceMiddleware.markInitialized()
+                
                 // Process the action first
                 val result = next(action)
                 
-                // Get the current state after processing
+                // Handle OnAction strategy (Flow-based strategies are handled by the collector)
                 val currentState = store.state.value
-                
-                // Handle state change for non-OnAction strategies
-                when (strategy) {
-                    is PersistenceStrategy.OnAction -> { /* Skip - handled below */ }
-                    is PersistenceStrategy.Combined -> {
-                        // Only handle non-OnAction strategies
-                        if (strategy.strategies.any { it !is PersistenceStrategy.OnAction }) {
-                            // Handle state change directly in the current coroutine context
-                            persistenceMiddleware.handleStateChange(currentState, store)
-                        }
-                    }
-                    else -> {
-                        // All other strategies - handle directly in the current coroutine context
-                        persistenceMiddleware.handleStateChange(currentState, store)
-                    }
-                }
-                
-                // Handle OnAction strategy
                 if (strategy is PersistenceStrategy.OnAction &&
                     action::class in strategy.actionTypes) {
                     try {
                         storage.save(currentState)
+                        logger.debug { "Persisted state for OnAction strategy" }
                     } catch (e: Exception) {
                         errorHandler(e)
                     }
@@ -369,6 +399,7 @@ class MiddlewareBuilder<TState:StateModel> {
                         if (action::class in onActionStrategy.actionTypes) {
                             try {
                                 storage.save(currentState)
+                                logger.debug { "Persisted state for OnAction in combined strategy" }
                             } catch (e: Exception) {
                                 errorHandler(e)
                             }
