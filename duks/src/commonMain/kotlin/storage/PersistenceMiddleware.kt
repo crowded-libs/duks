@@ -11,8 +11,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
-import kotlinx.coroutines.FlowPreview
 
 /**
  * Middleware that handles state persistence for any data format.
@@ -104,7 +102,7 @@ class PersistenceMiddleware<TState : StateModel>(
                 }
                 is PersistenceStrategy.Debounced -> {
                     store.state
-                        .debounce(strategy.delayMs.toLong())
+                        .debounce(strategy.delayMs)
                 }
                 is PersistenceStrategy.Conditional -> {
                     store.state
@@ -153,7 +151,7 @@ class PersistenceMiddleware<TState : StateModel>(
                 }
                 is PersistenceStrategy.Debounced -> {
                     store.state
-                        .debounce(strategy.delayMs.toLong())
+                        .debounce(strategy.delayMs)
                 }
                 is PersistenceStrategy.Conditional -> {
                     store.state
@@ -180,14 +178,7 @@ class PersistenceMiddleware<TState : StateModel>(
             else -> merge(*flows.toTypedArray())
         }
     }
-    
-    suspend fun handleStateChange(current: TState, store: KStore<TState>) {
-        // This method is now only used for OnAction strategies
-        // Flow-based strategies are handled by the collector
-        logger.trace { "handleStateChange called - likely for OnAction strategy" }
-    }
-    
-    
+
     private suspend fun persist(state: TState) {
         try {
             logger.info(strategy::class.simpleName, state.toString()) { 

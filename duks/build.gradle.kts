@@ -14,7 +14,7 @@ plugins {
 }
 
 group = "io.github.crowded-libs"
-version = "0.2.1"
+version = "0.2.3"
 
 kotlin {
     jvm()
@@ -35,12 +35,15 @@ kotlin {
     linuxX64()
     linuxArm64()
     mingwX64()
-    wasmJs()
+    wasmJs {
+        browser()
+    }
 
     sourceSets {
         all {
             languageSettings.apply {
                 optIn("kotlinx.coroutines.ExperimentalCoroutinesApi")
+                optIn("kotlin.time.ExperimentalTime")
             }
         }
         val commonMain by getting {

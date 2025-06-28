@@ -1,6 +1,6 @@
 package duks
 
-import kotlinx.datetime.Clock.System.now
+import kotlin.time.Clock.System.now
 
 /**
  * Default implementation of ActionCache that uses a simple in-memory map.

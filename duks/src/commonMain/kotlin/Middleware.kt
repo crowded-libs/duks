@@ -192,8 +192,7 @@ interface ActionCache {
  * @property expiresAfter The time at which this cached result should be considered expired
  * @property action The action that resulted from processing the original cacheable action
  */
-data class CachedActions(val expiresAfter: kotlinx.datetime.Instant,
-                         val action: Action)
+data class CachedActions (val expiresAfter: kotlin.time.Instant, val action: Action)
 
 /**
  * Creates middleware that caches the results of cacheable actions.

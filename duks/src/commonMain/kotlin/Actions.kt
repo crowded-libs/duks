@@ -2,10 +2,10 @@ package duks
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.datetime.Clock.System.now
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.plus
+import kotlin.time.Clock.System.now
 
 /**
  * Base interface for all actions in the Duks state management system.
@@ -101,7 +101,7 @@ interface AsyncAction<TResponse:Any> : AsyncFlowAction {
      * This function automatically handles the emission of AsyncProcessing, AsyncResultAction,
      * and AsyncComplete actions to provide a consistent lifecycle for async operations.
      * 
-     * @param getState A function that provides access to the current state
+     * @param stateAccessor Access to the store's current state
      * @return A Flow of actions representing the async operation lifecycle
      */
     override suspend fun executeFlow(stateAccessor: StateAccessor) : Flow<Action> = flow {
@@ -135,6 +135,6 @@ interface CacheableAction : Action {
      * By default, cacheable actions expire after one day, but implementations
      * can override this property to provide custom expiration times.
      */
-    val expiresAfter: kotlinx.datetime.Instant
+    val expiresAfter: kotlin.time.Instant
         get() = now().plus(1, DateTimeUnit.DAY, TimeZone.currentSystemDefault())
 }
