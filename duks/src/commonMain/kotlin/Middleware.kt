@@ -11,9 +11,6 @@ import duks.logging.error
  * async operations, logging, error handling, and other cross-cutting concerns.
  *
  * @param TState The type of state model used in the store
- * @property store The store instance that dispatched the action
- * @property next The function to call the next middleware in the chain
- * @property action The current action being processed
  * @return The action to be passed down the middleware chain
  */
 typealias Middleware<TState> = suspend (store: KStore<TState>, next: suspend (Action) -> Action, action: Action) -> Action

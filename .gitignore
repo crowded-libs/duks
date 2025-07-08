@@ -14,3 +14,4 @@ CLAUDE.md
 /.junie/
 #So we don't accidentally commit our private keys
 *.gpg
+.analysis/

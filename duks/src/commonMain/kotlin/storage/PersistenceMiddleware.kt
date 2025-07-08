@@ -96,29 +96,7 @@ class PersistenceMiddleware<TState : StateModel>(
         
         collectorJob = store.ioScope.launch {
             // Build the flow based on strategy
-            val persistenceFlow = when (strategy) {
-                is PersistenceStrategy.OnEveryChange -> {
-                    store.state
-                }
-                is PersistenceStrategy.Debounced -> {
-                    store.state
-                        .debounce(strategy.delayMs)
-                }
-                is PersistenceStrategy.Conditional -> {
-                    store.state
-                        .scan(Pair<TState?, TState?>(null, null)) { prevPair, current ->
-                            Pair(prevPair.second, current)
-                        }
-                        .filter { (prev, current) ->
-                            prev != null && current != null && strategy.shouldPersist(current, prev)
-                        }
-                        .map { it.second!! }
-                }
-                is PersistenceStrategy.Combined -> {
-                    buildCombinedFlow(store, strategy.strategies)
-                }
-                else -> null
-            }
+            val persistenceFlow = createStrategyFlow(store, strategy)
             
             // Collect and persist
             persistenceFlow?.collect { state ->
@@ -135,6 +113,38 @@ class PersistenceMiddleware<TState : StateModel>(
         }
     }
     
+    /**
+     * Creates a flow for a single persistence strategy.
+     */
+    private fun createStrategyFlow(
+        store: KStore<TState>,
+        strategy: PersistenceStrategy
+    ): Flow<TState>? {
+        return when (strategy) {
+            is PersistenceStrategy.OnEveryChange -> {
+                store.state
+            }
+            is PersistenceStrategy.Debounced -> {
+                store.state
+                    .debounce(strategy.delayMs)
+            }
+            is PersistenceStrategy.Conditional -> {
+                store.state
+                    .scan(Pair<TState?, TState?>(null, null)) { prevPair, current ->
+                        Pair(prevPair.second, current)
+                    }
+                    .filter { (prev, current) ->
+                        prev != null && current != null && strategy.shouldPersist(current, prev)
+                    }
+                    .map { it.second!! }
+            }
+            is PersistenceStrategy.Combined -> {
+                buildCombinedFlow(store, strategy.strategies)
+            }
+            else -> null
+        }
+    }
+    
     private fun buildCombinedFlow(store: KStore<TState>, strategies: List<PersistenceStrategy>): Flow<TState>? {
         // Filter out OnAction strategies as they're handled separately
         val flowStrategies = strategies.filter { it !is PersistenceStrategy.OnAction }
@@ -145,30 +155,7 @@ class PersistenceMiddleware<TState : StateModel>(
         
         // Create individual flows for each strategy
         val flows = flowStrategies.mapNotNull { strategy ->
-            when (strategy) {
-                is PersistenceStrategy.OnEveryChange -> {
-                    store.state
-                }
-                is PersistenceStrategy.Debounced -> {
-                    store.state
-                        .debounce(strategy.delayMs)
-                }
-                is PersistenceStrategy.Conditional -> {
-                    store.state
-                        .scan(Pair<TState?, TState?>(null, null)) { prevPair, current ->
-                            Pair(prevPair.second, current)
-                        }
-                        .filter { (prev, current) ->
-                            prev != null && current != null && strategy.shouldPersist(current, prev)
-                        }
-                        .map { it.second!! }
-                }
-                is PersistenceStrategy.Combined -> {
-                    // Recursively build combined flows
-                    buildCombinedFlow(store, strategy.strategies)
-                }
-                else -> null
-            }
+            createStrategyFlow(store, strategy)
         }
         
         // Merge all flows - any strategy triggering will cause persistence

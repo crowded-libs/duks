@@ -85,7 +85,6 @@ val store = KStore(
         logging(),
         async())
     )
-)
 ```
 
 ### 5. Use in Compose
@@ -499,8 +498,8 @@ val cacheMiddleware = CachingMiddleware<AppState>(
 
 1. **State Design**: Keep state immutable and normalized
 2. **Action Design**: Use sealed classes for type-safe action hierarchies
-5. **Performance**: Use `mapToPropsAsState` for Compose to minimize recomposition
-6. **Persistence**: Choose appropriate strategy (Debounced for frequent updates, OnAction for critical state)
+3. **Performance**: Use `mapToPropsAsState` for Compose to minimize recomposition
+4. **Persistence**: Choose appropriate strategy (Debounced for frequent updates, OnAction for critical state)
 
 ## Contributing
 

@@ -1,11 +1,11 @@
 package duks
 
 import duks.storage.*
-import duks.logging.Logger
-import duks.logging.error
+import duks.logging.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.Clock
 
 /**
  * Saga lifecycle events for determining when to persist.
@@ -86,7 +86,7 @@ private class SagaMiddlewareImpl<TState : StateModel>(
         // Process action through all registered sagas
         store.ioScope.launch {
             try {
-                processAction(action, store, next, registry, instanceManager, storage, persistenceStrategy, logger)
+                processAction(action, store,  registry, instanceManager, storage, persistenceStrategy, logger)
             } catch (e: Exception) {
                 logger.error(e) { "Error in saga middleware" }
             }
@@ -116,7 +116,7 @@ private class SagaInstanceManager {
                 @Suppress("UNCHECKED_CAST")
                 instances[instanceId] = (current as SagaInstance<Any>).copy(
                     state = newState,
-                    lastUpdatedAt = currentTimeMillis()
+                    lastUpdatedAt = Clock.System.now().toEpochMilliseconds()
                 )
             }
         }
@@ -147,7 +147,6 @@ private class SagaInstanceManager {
 private suspend fun <TState : StateModel> processAction(
     action: Action,
     store: KStore<TState>,
-    dispatch: suspend (Action) -> Action,
     registry: SagaRegistry<TState>,
     instanceManager: SagaInstanceManager,
     storage: SagaStorage?,
@@ -207,7 +206,7 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
         val context = SagaContextImpl<Any>(instanceId, store, { action ->
             store.dispatch(action)
             action
-        }, instanceManager, logger)
+        }, logger)
         
         // Execute the first matching handler
         val handler = startHandlers.first()
@@ -225,8 +224,8 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
                     id = instanceId,
                     sagaName = saga.name,
                     state = transition.newState,
-                    startedAt = currentTimeMillis(),
-                    lastUpdatedAt = currentTimeMillis()
+                    startedAt = Clock.System.now().toEpochMilliseconds(),
+                    lastUpdatedAt = Clock.System.now().toEpochMilliseconds()
                 )
                 instanceManager.addInstance(instance)
                 logger.info(saga.name, instanceId) { "Saga started: {sagaName} with id {sagaId}" }
@@ -283,7 +282,7 @@ private suspend fun <TState : StateModel> processInstanceAction(
         val context = SagaContextImpl<Any>(instance.id, store, { action ->
             store.dispatch(action)
             action
-        }, instanceManager, logger)
+        }, logger)
         
         // Execute the first matching handler
         val handler = activeHandlers.first()
@@ -364,7 +363,6 @@ private class SagaContextImpl<TSagaState>(
     override val sagaId: String,
     private val store: KStore<*>,
     private val dispatchFn: suspend (Action) -> Action,
-    private val instanceManager: SagaInstanceManager,
     private val logger: Logger
 ) : SagaContext<TSagaState> {
     
@@ -374,6 +372,7 @@ private class SagaContextImpl<TSagaState>(
     }
     
     override suspend fun dispatch(action: Action): Action {
+        logger.debug(sagaId, action::class.simpleName) { "Saga {sagaId} dispatching action: {action}" }
         return dispatchFn(action)
     }
     
@@ -391,10 +390,6 @@ private class SagaContextImpl<TSagaState>(
  * Generate a unique saga instance ID.
  */
 private fun generateSagaId(sagaName: String): String {
-    return "$sagaName-${currentTimeMillis()}-${(0..9999).random()}"
+    return "$sagaName-${Clock.System.now().toEpochMilliseconds()}-${(0..9999).random()}"
 }
 
-/**
- * Get current time in milliseconds (multiplatform).
- */
-internal expect fun currentTimeMillis(): Long

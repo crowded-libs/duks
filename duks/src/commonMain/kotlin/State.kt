@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.map
  * State objects should be treated as immutable, and all changes should be made
  * by creating new instances through reducers in response to actions.
  */
-interface StateModel {}
+interface StateModel
 
 interface StateAccessor {
     fun <TState:StateModel> getState(): TState

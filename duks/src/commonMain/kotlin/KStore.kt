@@ -23,8 +23,6 @@ import kotlinx.coroutines.sync.withLock
  * are needed.
  *
  * @param TState The type of state model used in the store
- * @param state The current state object
- * @param action The action to process
  * @return A new state object (or the same object if no changes are needed)
  */
 typealias Reducer<TState> = (TState, Action) -> TState
