@@ -211,7 +211,12 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
         
         // Execute the first matching handler
         val handler = startHandlers.first()
-        val transition = handler.handle(action, null, context)
+        val transition = try {
+            handler.handle(action, null, context)
+        } catch (e: Exception) {
+            logger.error(e, saga.name, instanceId, e.message) { "Saga {sagaName} with id {sagaId} failed during start: {error}" }
+            throw e
+        }
         
         when (transition) {
             is SagaTransition.Continue -> {
@@ -224,6 +229,7 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
                     lastUpdatedAt = currentTimeMillis()
                 )
                 instanceManager.addInstance(instance)
+                logger.info(saga.name, instanceId) { "Saga started: {sagaName} with id {sagaId}" }
                 
                 // Persist the new saga instance if storage is configured
                 if (storage != null && shouldPersist(persistenceStrategy, SagaEvent.Started)) {
@@ -281,7 +287,12 @@ private suspend fun <TState : StateModel> processInstanceAction(
         
         // Execute the first matching handler
         val handler = activeHandlers.first()
-        val transition = handler.handle(action, typedInstance.state, context)
+        val transition = try {
+            handler.handle(action, typedInstance.state, context)
+        } catch (e: Exception) {
+            logger.error(e, instance.id, e.message) { "Saga {sagaId} failed during action handling: {error}" }
+            throw e
+        }
         
         when (transition) {
             is SagaTransition.Continue -> {
@@ -306,6 +317,7 @@ private suspend fun <TState : StateModel> processInstanceAction(
             is SagaTransition.Complete -> {
                 // Remove instance
                 instanceManager.removeInstance(instance.id)
+                logger.info(instance.id) { "Saga completed: {sagaId}" }
                 
                 // Remove from persistence if storage is configured
                 if (storage != null) {
