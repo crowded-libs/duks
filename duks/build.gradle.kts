@@ -13,7 +13,7 @@ plugins {
 }
 
 group = "io.github.crowded-libs"
-version = "0.2.4"
+version = "0.2.5"
 
 kotlin {
     jvm()
