@@ -5,7 +5,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKotlinMultiplatformLibrary)
     alias(libs.plugins.kotlinx.serialization)
     alias(libs.plugins.dokka)
     alias(libs.plugins.vanniktech.mavenPublish)
@@ -13,17 +13,19 @@ plugins {
 }
 
 group = "io.github.crowded-libs"
-version = "0.2.5"
+version = "0.3.0"
 
 kotlin {
-    jvm()
-    androidTarget {
-        publishLibraryVariants("release")
+    android {
+        namespace = "io.github.crowdedlibs.duks"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
+        withHostTest {}
     }
-    iosX64()
+    jvm()
     iosArm64()
     iosSimulatorArm64()
     wasmJs {
@@ -37,32 +39,20 @@ kotlin {
                 optIn("kotlin.time.ExperimentalTime")
             }
         }
-        val commonMain by getting {
+        commonMain {
             dependencies {
                 implementation(libs.compose.runtime)
                 implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.kotlinx.datetime)
             }
         }
-        val commonTest by getting {
+        commonTest {
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.kotlinx.coroutines.test)
                 implementation(libs.kotlinx.serialization.json)
             }
         }
-    }
-}
-
-android {
-    namespace = "io.github.crowdedlibs.duks"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
     }
 }
 
@@ -73,7 +63,7 @@ dokka {
     }
 }
 
-val dokkaHtmlJar by tasks.registering(Jar::class) {
+val dokkaHtmlJar = tasks.register<Jar>("dokkaHtmlJar") {
     description = "A HTML Documentation JAR containing Dokka HTML"
     from(tasks.dokkaGeneratePublicationHtml.flatMap { it.outputDirectory })
     archiveClassifier.set("html-doc")

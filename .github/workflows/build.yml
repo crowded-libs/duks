@@ -37,6 +37,8 @@ jobs:
               - 'build.gradle.kts'
               - 'gradle.properties'
               - 'settings.gradle.kts'
+              - 'gradle/libs.versions.toml'
+              - 'gradle/wrapper/**'
               - '.github/workflows/**'
   
   build:

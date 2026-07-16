@@ -29,7 +29,7 @@ Add Duks to your project by including it in your Gradle build file:
 
 ```kotlin
 dependencies {
-    implementation("io.github.crowded-libs:duks:0.2.5")
+    implementation("io.github.crowded-libs:duks:0.3.0")
 }
 ```
 
