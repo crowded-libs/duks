@@ -1,7 +1,6 @@
 package duks.storage
 
 import duks.*
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.*
 import kotlinx.serialization.Serializable
@@ -442,19 +441,8 @@ class StatePersistenceTest {
             }
         }
         
-        // Use a more robust wait mechanism for restoration
-        var attempts = 0
-        while (testableStorage.state.value.loadCount == 0 && attempts < 50) {
-            delay(10)
-            runCurrent()
-            attempts++
-        }
-        
-        // Ensure restoration happened
-        assertTrue(testableStorage.state.value.loadCount > 0, "State should have been loaded")
-        
-        runCurrent()
-        advanceUntilIdle()
+        awaitUntil { testableStorage.state.value.loadCount > 0 }
+        awaitState(store2.state) { it.counter == 10 }
 
         // Store2 should have store1's persisted state
         assertEquals(10, store2.state.value.counter)
