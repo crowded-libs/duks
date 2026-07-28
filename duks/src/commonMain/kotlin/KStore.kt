@@ -125,11 +125,18 @@ class KStore<TState:StateModel> internal constructor(
     val state: StateFlow<TState> = _state.asStateFlow()
 
     /**
-     * Dispatches an action to the store.
+     * Dispatches an action to the store without waiting for it to finish.
      *
-     * The action is processed asynchronously through the middleware chain
-     * and then delivered to the reducer to produce a new state if needed.
+     * The action is processed on [ioScope] through the middleware chain and reducer.
      * No-ops if the store has been [close]d.
+     *
+     * **Concurrency:** only the reducer (state write) is serialized via a mutex.
+     * Concurrent dispatches may interleave in middleware. Use [dispatchAsync] when you
+     * need to await this action's middleware + reducer completion.
+     *
+     * Nested work started via fire-and-forget [dispatch] from middleware (for example
+     * async lifecycle actions or saga effects) is **not** awaited by [dispatchAsync]
+     * for the parent action.
      *
      * @param action The action to dispatch
      */
@@ -145,10 +152,31 @@ class KStore<TState:StateModel> internal constructor(
     }
 
     /**
+     * Dispatches an action and suspends until its middleware chain and reducer have completed.
+     *
+     * Does not wait for nested [dispatch] calls launched from middleware as separate jobs
+     * (async flows, saga effects, etc.). Returns the action produced by the middleware chain
+     * (often the original [action]).
+     *
+     * No-ops (returns [action] unchanged) if the store has been [close]d.
+     *
+     * @param action The action to process
+     * @return The action returned by the middleware chain
+     */
+    suspend fun dispatchAsync(action: Action): Action {
+        if (closed) {
+            logger.warn(action::class.simpleName) { "Ignoring dispatchAsync of {actionType} on closed store" }
+            return action
+        }
+        logger.trace(action::class.simpleName) { "dispatchAsync: {actionType}" }
+        return processAction(action)
+    }
+
+    /**
      * Processes an action through the middleware chain and reducer on the current coroutine.
      *
-     * Prefer [dispatch] for normal app use. This is used by initialization paths (e.g. persistence
-     * restore) that must complete before subsequent setup runs.
+     * Prefer [dispatch] / [dispatchAsync] for app use. This is used by initialization paths
+     * (e.g. persistence restore) that must complete before subsequent setup runs.
      *
      * @param action The action to process
      * @return The action returned by the middleware chain
@@ -365,11 +393,18 @@ class MiddlewareBuilder<TState:StateModel> {
 
     /**
      * Adds exception handling middleware to the chain.
-     * 
+     *
      * @param logger The logger to use for logging errors (defaults to Logger.default())
+     * @param onError Optional callback invoked when the chain throws
+     * @param errorAction Optional factory that can return an action delivered to `next`
+     *   (and the reducer) after an error
      */
-    fun exceptionHandling(logger: Logger = Logger.default()) {
-        middleware.add(exceptionMiddleware(logger))
+    fun exceptionHandling(
+        logger: Logger = Logger.default(),
+        onError: ((Throwable, Action) -> Unit)? = null,
+        errorAction: ((Throwable, Action) -> Action?)? = null
+    ) {
+        middleware.add(exceptionMiddleware(logger, onError, errorAction))
     }
 
     /**

@@ -216,6 +216,40 @@ class MiddlewareTest {
         
         assertEquals(3, store.state.value.counter)
     }
+
+    data class RecordedError(val message: String) : Action
+
+    @Test
+    fun `exceptionHandling invokes onError and optional errorAction`() = runTest(timeout = 5.seconds) {
+        val errors = mutableListOf<String>()
+        val store = createStoreForTest(TestState()) {
+            middleware {
+                exceptionHandling(
+                    onError = { t, action ->
+                        errors.add("${action::class.simpleName}:${t.message}")
+                    },
+                    errorAction = { t, action ->
+                        RecordedError("${action::class.simpleName}:${t.message}")
+                    }
+                )
+            }
+            reduceWith { state, action ->
+                when (action) {
+                    is ErrorAction -> throw RuntimeException(action.message)
+                    is RecordedError -> state.copy(error = action.message)
+                    is IncrementAction -> state.copy(counter = state.counter + action.value)
+                    else -> state
+                }
+            }
+        }
+
+        store.dispatchAsync(ErrorAction("boom"))
+        assertEquals(listOf("ErrorAction:boom"), errors)
+        assertEquals("ErrorAction:boom", store.state.value.error)
+
+        store.dispatchAsync(IncrementAction(2))
+        assertEquals(2, store.state.value.counter)
+    }
     
     @Test
     fun `should follow nested middleware execution order`() = runTest(timeout = 5.seconds) {

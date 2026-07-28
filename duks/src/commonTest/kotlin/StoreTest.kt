@@ -295,6 +295,51 @@ class StoreTest {
     }
 
     @Test
+    fun `dispatchAsync awaits middleware and reducer for this action`() = runTest(timeout = 5.seconds) {
+        val order = mutableListOf<String>()
+        val store = createStoreForTest(TestState()) {
+            middleware {
+                middleware { _, next, action ->
+                    order.add("mw-before")
+                    val result = next(action)
+                    order.add("mw-after")
+                    result
+                }
+            }
+            reduceWith { state, action ->
+                when (action) {
+                    is IncrementAction -> {
+                        order.add("reducer")
+                        state.copy(counter = state.counter + action.value)
+                    }
+                    else -> state
+                }
+            }
+        }
+
+        val returned = store.dispatchAsync(IncrementAction(4))
+        assertTrue(returned is IncrementAction)
+        assertEquals(listOf("mw-before", "reducer", "mw-after"), order)
+        assertEquals(4, store.state.value.counter)
+    }
+
+    @Test
+    fun `dispatchAsync on closed store is ignored`() = runTest(timeout = 5.seconds) {
+        val store = createStoreForTest(TestState()) {
+            reduceWith { state, action ->
+                when (action) {
+                    is IncrementAction -> state.copy(counter = state.counter + action.value)
+                    else -> state
+                }
+            }
+        }
+        store.close()
+        store.dispatchAsync(IncrementAction(1))
+        assertEquals(0, store.state.value.counter)
+        assertTrue(store.isClosed)
+    }
+
+    @Test
     fun `close stops persistence collector from saving further changes`() = runTest(timeout = 5.seconds) {
         val storage = InMemoryStorage<TestState>().testable()
         val store = createStoreForTest(TestState()) {

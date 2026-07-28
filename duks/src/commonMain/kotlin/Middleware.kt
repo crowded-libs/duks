@@ -137,18 +137,47 @@ fun <TState:StateModel> loggerMiddleware(logger: Logger = Logger.default()): Mid
 /**
  * Creates middleware that catches exceptions in the middleware chain.
  *
- * This middleware wraps the next middleware in a try-catch block, preventing
- * exceptions from crashing the application and logging them instead.
+ * Wraps `next` in try/catch so a failure does not crash the process. The original
+ * [action] is still returned to upstream middleware. Optionally invokes [onError]
+ * and/or runs an [errorAction] through the remaining chain (including the reducer).
  *
- * @param logger The logger to use for logging errors (defaults to Logger.default())
+ * @param logger Logger for errors (defaults to [Logger.default])
+ * @param onError Optional callback with the thrown error and the action being processed
+ * @param errorAction Optional factory; if it returns a non-null [Action], that action is
+ *   passed to `next` so reducers can record failure state. Exceptions from this second
+ *   `next` call are logged and do not rethrow.
  * @param TState The type of state model used in the store
  * @return A middleware function that handles exceptions
  */
-fun <TState:StateModel> exceptionMiddleware(logger: Logger = Logger.default()): Middleware<TState> = { store, next, action ->
+fun <TState : StateModel> exceptionMiddleware(
+    logger: Logger = Logger.default(),
+    onError: ((Throwable, Action) -> Unit)? = null,
+    errorAction: ((Throwable, Action) -> Action?)? = null
+): Middleware<TState> = { store, next, action ->
     try {
         next(action)
     } catch (e: Exception) {
         logger.error(e, action) { "Exception processing action: {action}" }
+        try {
+            onError?.invoke(e, action)
+        } catch (callbackError: Exception) {
+            logger.error(callbackError, action) { "Exception in onError callback for action: {action}" }
+        }
+        val recovery = try {
+            errorAction?.invoke(e, action)
+        } catch (factoryError: Exception) {
+            logger.error(factoryError, action) { "Exception in errorAction factory for action: {action}" }
+            null
+        }
+        if (recovery != null) {
+            try {
+                next(recovery)
+            } catch (recoveryError: Exception) {
+                logger.error(recoveryError, recovery) {
+                    "Exception processing errorAction: {action}"
+                }
+            }
+        }
     }
     action
 }

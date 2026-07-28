@@ -92,16 +92,27 @@ Use `createStore` (the store constructor is internal):
 ```kotlin
 val store = createStore(AppState()) {
     middleware {
-        exceptionHandling()
+        exceptionHandling(
+            onError = { error, action -> /* metrics / logging hooks */ },
+            errorAction = { error, action -> /* optional Action for the reducer */ null }
+        )
         logging()
         async()
     }
     reduceWith(appReducer)
 }
 
+// Fire-and-forget (UI):
+store.dispatch(AppAction.Increment)
+
+// Await this action's middleware + reducer (not nested async/saga work):
+// store.dispatchAsync(AppAction.LoadUser("id"))
+
 // When the store is no longer needed (tests, multi-window, etc.):
 // store.close()
 ```
+
+**Concurrency:** only the reducer’s state write is serialized. Concurrent `dispatch` calls may interleave in middleware. Prefer `dispatchAsync` when you need to await completion of a single action’s chain.
 
 ### Recommended middleware order
 
