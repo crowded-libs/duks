@@ -378,10 +378,12 @@ Saga instances can be persisted via `sagas(storage = ..., persistenceStrategy = 
 
 ### Action Caching
 
-`CacheableAction` uses action equality as the cache key and `expiresAfter` for TTL:
+`CacheableAction` uses `cacheKey` (default: `toString()`) and `expiresAfter` for TTL.
+`MapActionCache` removes expired entries on read and can cap size via `MapActionCache(maxSize = …)`.
 
 ```kotlin
 data class SearchProducts(val query: String) : Action, CacheableAction {
+    override val cacheKey: String = "search:$query"
     override val expiresAfter: Instant =
         Clock.System.now().plus(5, DateTimeUnit.MINUTE, TimeZone.currentSystemDefault())
 }
@@ -389,7 +391,7 @@ data class SearchProducts(val query: String) : Action, CacheableAction {
 val store = createStore(AppState()) {
     middleware {
         exceptionHandling()
-        caching() // defaults to MapActionCache()
+        caching(MapActionCache(maxSize = 256))
         async()
     }
     reduceWith(appReducer)

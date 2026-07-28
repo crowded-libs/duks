@@ -3,52 +3,77 @@ package duks
 import kotlin.time.Clock.System.now
 
 /**
- * Default implementation of ActionCache that uses a simple in-memory map.
+ * Default implementation of [ActionCache] that uses an in-memory map.
  *
- * This implementation stores cached action results in a mutable map and
- * handles expiration based on the timestamp stored in each CachedActions entry.
+ * Entries are keyed by [CacheableAction.cacheKey]. Expired entries are removed
+ * on [has] / [get]. When [maxSize] is positive, inserts may evict expired entries
+ * first, then an arbitrary existing entry if still over capacity.
+ *
+ * @param maxSize Maximum number of live entries to retain; `0` means unlimited.
  */
-class MapActionCache : ActionCache {
+class MapActionCache(
+    private val maxSize: Int = 0
+) : ActionCache {
+    private val cache: MutableMap<String, CachedActions> = mutableMapOf()
+
     /**
-     * The internal map storing the cached actions.
+     * Number of entries currently held (including any not yet purged as expired).
      */
-    private val cache: MutableMap<Action, CachedActions> = mutableMapOf()
+    val size: Int
+        get() = cache.size
 
     /**
      * Checks if the cache contains a valid, non-expired entry for the given action.
-     *
-     * @param action The cacheable action to check
-     * @return true if the action is cached and not expired, false otherwise
+     * Removes the entry if it has expired.
      */
     override fun has(action: CacheableAction): Boolean {
-        val value = cache[action]
-        return value != null && value.expiresAfter > now()
+        return getValid(action.cacheKey) != null
     }
 
     /**
-     * Stores an action result in the cache.
-     *
-     * @param action The cacheable action to use as a key
-     * @param cached The cached action result with expiration time
+     * Stores an action result in the cache, keyed by [CacheableAction.cacheKey].
      */
     override fun put(action: CacheableAction, cached: CachedActions) {
-        cache[action] = cached
+        val key = action.cacheKey
+        if (maxSize > 0 && key !in cache && cache.size >= maxSize) {
+            evictExpired()
+            if (cache.size >= maxSize) {
+                val victim = cache.keys.firstOrNull()
+                if (victim != null) {
+                    cache.remove(victim)
+                }
+            }
+        }
+        cache[key] = cached
     }
 
     /**
-     * Retrieves a cached action result, returning null if expired.
-     *
-     * @param action The cacheable action to look up
-     * @return The cached action result or null if not found or expired
+     * Retrieves a cached action result, returning null if missing or expired.
+     * Removes the entry when expired.
      */
     override fun get(action: CacheableAction): CachedActions? {
-        val value = cache[action]
-        value?.let {
-            if(value.expiresAfter < now()) {
-                return null
-            }
+        return getValid(action.cacheKey)
+    }
+
+    private fun getValid(key: String): CachedActions? {
+        val value = cache[key] ?: return null
+        return if (isExpired(value)) {
+            cache.remove(key)
+            null
+        } else {
+            value
         }
-        return value
+    }
+
+    private fun isExpired(cached: CachedActions): Boolean {
+        return cached.expiresAfter <= now()
+    }
+
+    private fun evictExpired() {
+        val now = now()
+        val expiredKeys = cache.entries
+            .filter { it.value.expiresAfter <= now }
+            .map { it.key }
+        expiredKeys.forEach { cache.remove(it) }
     }
 }
-

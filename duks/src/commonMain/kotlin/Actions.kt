@@ -124,17 +124,30 @@ interface AsyncAction<TResponse:Any> : AsyncFlowAction {
 
 /**
  * Interface for actions that can be cached.
- * 
+ *
  * Cacheable actions are stored in an action cache to avoid redundant processing
  * of identical actions, improving performance for frequently dispatched actions.
+ *
+ * Prefer pure, sync transforms. Caching middleware is not a substitute for
+ * memoizing async/network results.
  */
 interface CacheableAction : Action {
     /**
      * The timestamp when this cached action should expire.
-     * 
+     *
      * By default, cacheable actions expire after one day, but implementations
      * can override this property to provide custom expiration times.
      */
     val expiresAfter: kotlin.time.Instant
         get() = now().plus(1, DateTimeUnit.DAY, TimeZone.currentSystemDefault())
+
+    /**
+     * Stable key used by [MapActionCache] (and similar implementations) for lookup.
+     *
+     * Defaults to [toString], which works well for data classes whose string form
+     * includes all fields that affect the result. Override when you need a key
+     * independent of the default string representation.
+     */
+    val cacheKey: String
+        get() = toString()
 }
