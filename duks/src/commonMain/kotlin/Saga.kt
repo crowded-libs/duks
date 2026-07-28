@@ -38,11 +38,20 @@ sealed class SagaTransition<TSagaState> {
         val newState: TSagaState,
         val effects: List<SagaEffect> = emptyList()
     ) : SagaTransition<TSagaState>()
-    
+
     /**
-     * Complete the saga and remove it from active instances.
+     * Complete the saga successfully and remove it from active instances.
      */
     data class Complete<TSagaState>(
+        val effects: List<SagaEffect> = emptyList()
+    ) : SagaTransition<TSagaState>()
+
+    /**
+     * Fail the saga: remove the instance, drop persisted state, run [effects],
+     * then stop handling further actions for this instance.
+     */
+    data class Fail<TSagaState>(
+        val error: Throwable,
         val effects: List<SagaEffect> = emptyList()
     ) : SagaTransition<TSagaState>()
 }
@@ -55,16 +64,21 @@ sealed class SagaEffect {
      * Dispatch an action to the store.
      */
     data class Dispatch(val action: Action) : SagaEffect()
-    
+
     /**
      * Delay execution for a specified duration.
      */
     data class Delay(val milliseconds: Long) : SagaEffect()
-    
+
     /**
      * Start another saga with a trigger action.
      */
     data class StartSaga(val sagaName: String, val trigger: Action) : SagaEffect()
+
+    /**
+     * Run child effects concurrently (each child's sequential order is preserved).
+     */
+    data class Parallel(val effects: List<SagaEffect>) : SagaEffect()
 }
 
 /**

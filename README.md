@@ -301,8 +301,17 @@ class OnboardingSaga : SagaDefinition<OnboardingSagaState> {
                 )
             }
         }
+
+        // Fail removes the instance, clears persistence, and runs effects:
+        // SagaTransition.Fail(error, effects = listOf(SagaEffect.Dispatch(...)))
     }
 }
+
+// Multi-step fan-in (wait for several load completions):
+// afterFanInStep(allSteps, completedSteps, step, updateState = { ... }) {
+//     dispatch(AllLoaded); SagaTransition.Complete()
+// }
+
 
 val store = createStore(AppState()) {
     middleware {

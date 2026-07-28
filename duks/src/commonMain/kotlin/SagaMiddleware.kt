@@ -42,6 +42,8 @@ private class SagaMiddlewareImpl<TState : StateModel>(
 ) : Middleware<TState>, StoreLifecycleAware<TState> {
 
     private val instanceManager = SagaInstanceManager()
+    private val processJobsMutex = Mutex()
+    private val processJobs = mutableListOf<Job>()
     private var store: KStore<TState>? = null
     private var persistence: SagaPersistenceController? = null
 
@@ -71,9 +73,16 @@ private class SagaMiddlewareImpl<TState : StateModel>(
     }
 
     override suspend fun onStoreDestroyed() {
+        // Cancel in-flight action processing and debounce jobs
+        processJobsMutex.withLock {
+            processJobs.forEach { it.cancel() }
+            processJobs.clear()
+        }
         persistence?.cancelAll()
+        instanceManager.clearAll()
         persistence = null
         store = null
+        logger.info { "Saga middleware torn down (jobs cancelled, instances cleared)" }
     }
 
     override suspend fun invoke(
@@ -83,7 +92,7 @@ private class SagaMiddlewareImpl<TState : StateModel>(
     ): Action {
         val result = next(action)
 
-        store.ioScope.launch {
+        val job = store.ioScope.launch {
             try {
                 processAction(
                     action = action,
@@ -93,9 +102,15 @@ private class SagaMiddlewareImpl<TState : StateModel>(
                     persistence = persistence,
                     logger = logger
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 logger.error(e) { "Error in saga middleware" }
             }
+        }
+        processJobsMutex.withLock {
+            processJobs.removeAll { !it.isActive }
+            processJobs.add(job)
         }
 
         return result
@@ -280,6 +295,18 @@ private class SagaInstanceManager {
             return instances[instanceId]
         }
     }
+
+    suspend fun clearAll() {
+        mutex.withLock {
+            instances.clear()
+        }
+    }
+
+    suspend fun activeCount(): Int {
+        mutex.withLock {
+            return instances.size
+        }
+    }
 }
 
 /**
@@ -353,12 +380,13 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
 
         when (transition) {
             is SagaTransition.Continue -> {
+                val now = Clock.System.now().toEpochMilliseconds()
                 val instance = SagaInstance(
                     id = instanceId,
                     sagaName = saga.name,
                     state = transition.newState,
-                    startedAt = Clock.System.now().toEpochMilliseconds(),
-                    lastUpdatedAt = Clock.System.now().toEpochMilliseconds()
+                    startedAt = now,
+                    lastUpdatedAt = now
                 )
                 instanceManager.addInstance(instance)
                 logger.info(saga.name, instanceId) { "Saga started: {sagaName} with id {sagaId}" }
@@ -366,6 +394,12 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
                 executeEffects(transition.effects, context)
             }
             is SagaTransition.Complete -> {
+                executeEffects(transition.effects, context)
+            }
+            is SagaTransition.Fail -> {
+                logger.error(transition.error, saga.name, instanceId) {
+                    "Saga {sagaName} failed during start ({sagaId}): {error}"
+                }
                 executeEffects(transition.effects, context)
             }
         }
@@ -424,6 +458,14 @@ private suspend fun <TState : StateModel> processInstanceAction(
                 persistence?.onCompleted(instance.id)
                 executeEffects(transition.effects, context)
             }
+            is SagaTransition.Fail -> {
+                instanceManager.removeInstance(instance.id)
+                logger.error(transition.error, instance.id) {
+                    "Saga failed: {sagaId} — {error}"
+                }
+                persistence?.onCompleted(instance.id)
+                executeEffects(transition.effects, context)
+            }
         }
     }
 }
@@ -447,22 +489,36 @@ private fun <TState : StateModel> createContext(
 }
 
 /**
- * Execute saga effects.
+ * Execute saga effects sequentially; [SagaEffect.Parallel] children run concurrently.
  */
 private suspend fun executeEffects(
     effects: List<SagaEffect>,
     context: SagaContextImpl<*>
 ) {
     effects.forEach { effect ->
-        when (effect) {
-            is SagaEffect.Dispatch -> {
-                context.dispatch(effect.action)
-            }
-            is SagaEffect.Delay -> {
-                delay(effect.milliseconds)
-            }
-            is SagaEffect.StartSaga -> {
-                context.startSaga(effect.sagaName, effect.trigger)
+        executeEffect(effect, context)
+    }
+}
+
+private suspend fun executeEffect(
+    effect: SagaEffect,
+    context: SagaContextImpl<*>
+) {
+    when (effect) {
+        is SagaEffect.Dispatch -> {
+            context.dispatch(effect.action)
+        }
+        is SagaEffect.Delay -> {
+            delay(effect.milliseconds)
+        }
+        is SagaEffect.StartSaga -> {
+            context.startSaga(effect.sagaName, effect.trigger)
+        }
+        is SagaEffect.Parallel -> {
+            coroutineScope {
+                effect.effects.map { child ->
+                    async { executeEffect(child, context) }
+                }.awaitAll()
             }
         }
     }
@@ -503,8 +559,16 @@ private class SagaContextImpl<TSagaState>(
 }
 
 /**
- * Generate a unique saga instance ID.
+ * Monotonic per-process saga id generator (no random collisions under burst).
  */
-private fun generateSagaId(sagaName: String): String {
-    return "$sagaName-${Clock.System.now().toEpochMilliseconds()}-${(0..9999).random()}"
+private object SagaIdSequence {
+    private val mutex = Mutex()
+    private var sequence: Long = 0L
+
+    suspend fun next(sagaName: String): String {
+        val n = mutex.withLock { ++sequence }
+        return "$sagaName-$n"
+    }
 }
+
+private suspend fun generateSagaId(sagaName: String): String = SagaIdSequence.next(sagaName)
