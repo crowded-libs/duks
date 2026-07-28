@@ -898,6 +898,91 @@ class StatePersistenceTest {
         assertEquals(106, store.state.value.counter)
     }
     
+    // === Restore race / ordered dispatcher ===
+
+    /**
+     * Regression: fire-and-forget RestoreStateAction allowed the Flow collector to see
+     * initialState before restore applied, then persist it over stored data.
+     * Uses the default StandardTestDispatcher from runTest (not Unconfined) so ordering
+     * is explicit.
+     */
+    @Test
+    fun `restore must not overwrite storage with initial state under ordered dispatcher`() =
+        runTest(timeout = 5.seconds) {
+            val storage = InMemoryStorage<TestState>()
+            val testableStorage = storage.testable()
+
+            val savedState = TestState(
+                counter = 42,
+                message = "must-survive-restore",
+                items = listOf("a", "b")
+            )
+            testableStorage.save(savedState)
+            testableStorage.resetCounters()
+
+            val initialState = TestState() // empty defaults
+            assertNotEquals(savedState, initialState)
+
+            val store = createStoreForTest(initialState) {
+                reduceWith(::testReducer)
+                middleware {
+                    persistence(
+                        storage = testableStorage,
+                        strategy = PersistenceStrategy.OnEveryChange
+                    )
+                }
+            }
+
+            // Drive the ordered test scheduler: lifecycle restore + collector setup
+            runCurrent()
+            advanceUntilIdle()
+
+            // Store reflects persisted data
+            assertEquals(savedState, store.state.value)
+
+            // Storage must still hold the saved snapshot — never rewritten with initial
+            assertEquals(savedState, storage.load())
+            assertEquals(
+                0,
+                testableStorage.state.value.saveCount,
+                "Restore must not cause a save of initial or intermediate state"
+            )
+            assertEquals(1, testableStorage.state.value.loadCount)
+        }
+
+    @Test
+    fun `OnEveryChange after restore only saves real mutations not the restore itself`() =
+        runTest(timeout = 5.seconds) {
+            val storage = InMemoryStorage<TestState>()
+            val testableStorage = storage.testable()
+
+            val savedState = TestState(counter = 7, message = "restored")
+            testableStorage.save(savedState)
+            testableStorage.resetCounters()
+
+            val store = createStoreForTest(TestState()) {
+                reduceWith(::testReducer)
+                middleware {
+                    persistence(
+                        storage = testableStorage,
+                        strategy = PersistenceStrategy.OnEveryChange
+                    )
+                }
+            }
+
+            runCurrent()
+            advanceUntilIdle()
+            assertEquals(savedState, store.state.value)
+            assertEquals(0, testableStorage.state.value.saveCount)
+
+            store.dispatch(IncrementAction(3))
+            runCurrent()
+            advanceUntilIdle()
+
+            assertEquals(1, testableStorage.state.value.saveCount)
+            assertEquals(TestState(counter = 10, message = "restored"), storage.load())
+        }
+
     // === Tests from RestoreNoPersistTest ===
     
     @Test

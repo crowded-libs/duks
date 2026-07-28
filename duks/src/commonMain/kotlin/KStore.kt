@@ -110,12 +110,26 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
     fun dispatch(action: Action) {
         logger.trace(action::class.simpleName) { "Dispatching action: {actionType}" }
         ioScope.launch {
-            middleware(this@KStore, { a ->
-                _stateMutex.withLock {
-                    applyReducer(a)
-                }
-            }, action)
+            processAction(action)
         }
+    }
+
+    /**
+     * Processes an action through the middleware chain and reducer on the current coroutine.
+     *
+     * Prefer [dispatch] for normal app use. This is used by initialization paths (e.g. persistence
+     * restore) that must complete before subsequent setup runs.
+     *
+     * @param action The action to process
+     * @return The action returned by the middleware chain
+     */
+    internal suspend fun processAction(action: Action): Action {
+        logger.trace(action::class.simpleName) { "Processing action: {actionType}" }
+        return middleware(this@KStore, { a ->
+            _stateMutex.withLock {
+                applyReducer(a)
+            }
+        }, action)
     }
 
     internal val stateAccessor: StateAccessor = object : StateAccessor {
@@ -369,42 +383,43 @@ class MiddlewareBuilder<TState:StateModel> {
                 // Update the previous state to match restored state to prevent re-saving
                 @Suppress("UNCHECKED_CAST")
                 persistenceMiddleware.previousState = action.state as TState
-                // Now we can mark as initialized after restore is processed
+                // Allow Flow collectors after restore has been applied
                 persistenceMiddleware.markInitialized()
                 result
             } else {
                 // Mark as initialized on first real action (after restoration is complete)
                 persistenceMiddleware.markInitialized()
-                
+
                 // Process the action first
                 val result = next(action)
-                
-                // Handle OnAction strategy (Flow-based strategies are handled by the collector)
-                val currentState = store.state.value
-                if (strategy is PersistenceStrategy.OnAction &&
-                    action::class in strategy.actionTypes) {
-                    try {
-                        storage.save(currentState)
-                        logger.debug { "Persisted state for OnAction strategy" }
-                    } catch (e: Exception) {
-                        errorHandler(e)
+
+                // Handle OnAction strategy only once persistence is allowed
+                if (persistenceMiddleware.canPersist) {
+                    val currentState = store.state.value
+                    if (strategy is PersistenceStrategy.OnAction &&
+                        action::class in strategy.actionTypes) {
+                        try {
+                            storage.save(currentState)
+                            logger.debug { "Persisted state for OnAction strategy" }
+                        } catch (e: Exception) {
+                            errorHandler(e)
+                        }
                     }
-                }
-                
-                // Handle OnAction in combined strategies
-                if (strategy is PersistenceStrategy.Combined) {
-                    strategy.strategies.filterIsInstance<PersistenceStrategy.OnAction>().forEach { onActionStrategy ->
-                        if (action::class in onActionStrategy.actionTypes) {
-                            try {
-                                storage.save(currentState)
-                                logger.debug { "Persisted state for OnAction in combined strategy" }
-                            } catch (e: Exception) {
-                                errorHandler(e)
+
+                    if (strategy is PersistenceStrategy.Combined) {
+                        strategy.strategies.filterIsInstance<PersistenceStrategy.OnAction>().forEach { onActionStrategy ->
+                            if (action::class in onActionStrategy.actionTypes) {
+                                try {
+                                    storage.save(currentState)
+                                    logger.debug { "Persisted state for OnAction in combined strategy" }
+                                } catch (e: Exception) {
+                                    errorHandler(e)
+                                }
                             }
                         }
                     }
                 }
-                
+
                 result
             }
         }

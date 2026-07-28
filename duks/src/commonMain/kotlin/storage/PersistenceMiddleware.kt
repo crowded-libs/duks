@@ -8,14 +8,13 @@ import duks.StateModel
 import duks.StoreLifecycleAware
 import duks.logging.*
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 /**
  * Middleware that handles state persistence for any data format.
  * This allows efficient storage without forcing ByteArray conversions.
- * 
+ *
  * @param TState The type of state being persisted
  */
 class PersistenceMiddleware<TState : StateModel>(
@@ -24,35 +23,41 @@ class PersistenceMiddleware<TState : StateModel>(
     private val errorHandler: (Exception) -> Unit = {},
     private val logger: Logger = Logger.default()
 ) : StoreLifecycleAware<TState> {
-    
+
     init {
         logger.info { "PersistenceMiddleware created with strategy: ${strategy::class.simpleName}" }
     }
-    
-    internal var persistenceJob: Job? = null
+
     private var collectorJob: Job? = null
     internal var previousState: TState? = null
     private var isInitialized: Boolean = false
     private var restorationComplete: Boolean = false
-    
+
+    /**
+     * Whether the middleware has finished restoration and is allowed to persist.
+     * Exposed for tests and OnAction handling in the store builder.
+     */
+    internal val canPersist: Boolean
+        get() = isInitialized && restorationComplete
+
     override suspend fun onStoreCreated(store: KStore<TState>) {
         logger.info { "PersistenceMiddleware.onStoreCreated called" }
-        // Cancel any pending persistence from initial state
-        persistenceJob?.cancel()
-        persistenceJob = null
-        
+
         // Notify other middleware that storage restoration is starting
         store.notifyStorageRestorationStarted()
-        
+
         // Restore persisted state
         logger.info { "Attempting to restore persisted state" }
         var restored = false
         try {
             storage.load()?.let { storedState ->
                 logger.info(storedState::class.simpleName) { "Successfully restored state of type: {stateType}" }
-                // Set previous state BEFORE dispatching restore action
+                // Align previousState before applying restore so equality checks never
+                // treat the restored value as a dirty write.
                 previousState = storedState
-                store.dispatch(RestoreStateAction(storedState))
+                // Await middleware + reducer so store.state is restored before the
+                // Flow collector starts (fire-and-forget dispatch races with collect).
+                store.processAction(RestoreStateAction(storedState))
                 logger.debug { "State restoration completed successfully" }
                 restored = true
             } ?: run {
@@ -65,43 +70,49 @@ class PersistenceMiddleware<TState : StateModel>(
             errorHandler(e)
             previousState = store.state.value
         }
-        
-        // Mark restoration as complete but NOT initialized yet
-        // This prevents any actions from causing persistence until we explicitly allow it
+
+        // Restoration finished. processAction(Restore) may have tried markInitialized while
+        // restorationComplete was still false; enable persistence only after this flag flips.
         restorationComplete = true
+        if (restored) {
+            // Restored state is already applied and previousState matches — safe to allow
+            // collectors (equality short-circuit prevents rewriting storage with the same value).
+            markInitialized()
+        }
         logger.info { "Restoration phase complete, persistence middleware ready" }
-        
+
         // Notify other middleware that storage restoration has completed
         store.notifyStorageRestorationCompleted(restored)
-        
-        // Set up Flow-based persistence collector based on strategy
+
+        // Only open the collector after restore has been applied to store.state
         setupFlowCollector(store)
     }
-    
+
     private fun setupFlowCollector(store: KStore<TState>) {
         // Don't set up collector for OnAction-only strategies
         if (strategy is PersistenceStrategy.OnAction) {
             logger.debug { "OnAction strategy detected, skipping Flow collector setup" }
             return
         }
-        
+
         // Check for combined strategies that only contain OnAction
-        if (strategy is PersistenceStrategy.Combined && 
+        if (strategy is PersistenceStrategy.Combined &&
             strategy.strategies.all { it is PersistenceStrategy.OnAction }) {
             logger.debug { "Combined strategy with only OnAction strategies, skipping Flow collector setup" }
             return
         }
-        
+
         logger.info(strategy::class.simpleName) { "Setting up Flow-based persistence collector for strategy: {strategy}" }
-        
+
         collectorJob = store.ioScope.launch {
-            // Build the flow based on strategy
             val persistenceFlow = createStrategyFlow(store, strategy)
-            
-            // Collect and persist
+
             persistenceFlow?.collect { state ->
                 logger.trace { "Flow collector received state: $state, previousState: $previousState" }
-                // Check if state is different from last persisted state
+                if (!canPersist) {
+                    logger.trace { "Skipping persist - middleware not initialized" }
+                    return@collect
+                }
                 if (state != previousState) {
                     logger.debug { "State differs from previousState, persisting" }
                     persist(state)
@@ -112,7 +123,7 @@ class PersistenceMiddleware<TState : StateModel>(
             }
         }
     }
-    
+
     /**
      * Creates a flow for a single persistence strategy.
      */
@@ -144,21 +155,19 @@ class PersistenceMiddleware<TState : StateModel>(
             else -> null
         }
     }
-    
+
     private fun buildCombinedFlow(store: KStore<TState>, strategies: List<PersistenceStrategy>): Flow<TState>? {
         // Filter out OnAction strategies as they're handled separately
         val flowStrategies = strategies.filter { it !is PersistenceStrategy.OnAction }
-        
+
         if (flowStrategies.isEmpty()) {
             return null
         }
-        
-        // Create individual flows for each strategy
+
         val flows = flowStrategies.mapNotNull { strategy ->
             createStrategyFlow(store, strategy)
         }
-        
-        // Merge all flows - any strategy triggering will cause persistence
+
         return when (flows.size) {
             0 -> null
             1 -> flows.first()
@@ -167,9 +176,13 @@ class PersistenceMiddleware<TState : StateModel>(
     }
 
     private suspend fun persist(state: TState) {
+        if (!canPersist) {
+            logger.debug { "Skipping persist - middleware not initialized" }
+            return
+        }
         try {
-            logger.info(strategy::class.simpleName, state.toString()) { 
-                "Persisting state using strategy: {strategy}. State content: {stateContent}" 
+            logger.info(strategy::class.simpleName, state.toString()) {
+                "Persisting state using strategy: {strategy}. State content: {stateContent}"
             }
             storage.save(state)
             logger.info { "State persisted successfully" }
@@ -178,48 +191,10 @@ class PersistenceMiddleware<TState : StateModel>(
             errorHandler(e)
         }
     }
-    
-    
-    private suspend fun handleCombinedStrategies(
-        current: TState,
-        previous: TState?,
-        strategies: List<PersistenceStrategy>,
-        store: KStore<TState>
-    ) {
-        for (strategy in strategies) {
-            when (strategy) {
-                is PersistenceStrategy.OnEveryChange -> {
-                    persist(current)
-                    return // Any strategy triggering is enough
-                }
-                is PersistenceStrategy.Debounced -> {
-                    persistenceJob?.cancel()
-                    persistenceJob = store.ioScope.launch {
-                        delay(strategy.delayMs)
-                        persist(current)
-                    }
-                    return
-                }
-                is PersistenceStrategy.Conditional -> {
-                    if (previous != null && strategy.shouldPersist(current, previous)) {
-                        persist(current)
-                        return
-                    }
-                }
-                // OnAction handled in process()
-                is PersistenceStrategy.OnAction -> { /* Handled in process() */ }
-                is PersistenceStrategy.Combined -> {
-                    // Nested combined strategies - recursively handle
-                    handleCombinedStrategies(current, previous, strategy.strategies, store)
-                }
-            }
-        }
-    }
-    
-    
+
     /**
      * Marks the middleware as initialized, allowing persistence to begin.
-     * This should be called after the first real action is processed.
+     * Called after restoration completes and the first eligible action is processed.
      */
     fun markInitialized() {
         if (!isInitialized && restorationComplete) {
@@ -229,21 +204,17 @@ class PersistenceMiddleware<TState : StateModel>(
             logger.debug { "Cannot initialize - restoration not yet complete" }
         }
     }
-    
+
     /**
      * Cleanup method to cancel collector job when store is destroyed
      */
     fun cleanup() {
         logger.debug { "Cleaning up persistence middleware" }
         collectorJob?.cancel()
-        persistenceJob?.cancel()
         collectorJob = null
-        persistenceJob = null
     }
-    
+
     override suspend fun onStoreDestroyed() {
         cleanup()
     }
 }
-
-
