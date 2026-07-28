@@ -1,8 +1,14 @@
 package duks
 
+import duks.storage.InMemoryStorage
+import duks.storage.PersistenceStrategy
+import duks.storage.testable
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
@@ -18,6 +24,16 @@ class StoreTest {
     data class DecrementAction(val value: Int = 1) : Action
     data class AddMessageAction(val message: String) : Action
     class ErrorAction(val message: String = "Test error") : Action
+
+    private class LifecycleTracker<TState : StateModel> : StoreLifecycleAware<TState> {
+        val events = mutableListOf<String>()
+        override suspend fun onStoreCreated(store: KStore<TState>) {
+            events.add("onStoreCreated")
+        }
+        override suspend fun onStoreDestroyed() {
+            events.add("onStoreDestroyed")
+        }
+    }
 
     @Test
     fun `should create store with initial state`() = runTest(timeout = 5.seconds) {
@@ -227,5 +243,94 @@ class StoreTest {
         assertEquals(5, store.state.value.counter)
         assertEquals(1, store.state.value.messages.size)
         assertEquals("Increment: 5", store.state.value.messages[0])
+    }
+
+    @Test
+    fun `close notifies lifecycle middleware and is idempotent`() = runTest(timeout = 5.seconds) {
+        val tracker = LifecycleTracker<TestState>()
+        val store = createStoreForTest(TestState()) {
+            middleware {
+                lifecycleAware(tracker)
+            }
+            reduceWith { state, _ -> state }
+        }
+
+        runCurrent()
+        advanceUntilIdle()
+        assertTrue(tracker.events.contains("onStoreCreated"))
+        assertFalse(store.isClosed)
+
+        store.close()
+        assertTrue(store.isClosed)
+        assertEquals(1, tracker.events.count { it == "onStoreDestroyed" })
+
+        store.close()
+        assertEquals(
+            1,
+            tracker.events.count { it == "onStoreDestroyed" },
+            "Second close must not notify destroy again"
+        )
+    }
+
+    @Test
+    fun `dispatch after close does not update state`() = runTest(timeout = 5.seconds) {
+        val store = createStoreForTest(TestState()) {
+            reduceWith { state, action ->
+                when (action) {
+                    is IncrementAction -> state.copy(counter = state.counter + action.value)
+                    else -> state
+                }
+            }
+        }
+
+        dispatchAndAdvance(store, IncrementAction(3))
+        assertEquals(3, store.state.value.counter)
+
+        store.close()
+        store.dispatch(IncrementAction(10))
+        runCurrent()
+        advanceUntilIdle()
+
+        assertEquals(3, store.state.value.counter, "Closed store must ignore dispatch")
+    }
+
+    @Test
+    fun `close stops persistence collector from saving further changes`() = runTest(timeout = 5.seconds) {
+        val storage = InMemoryStorage<TestState>().testable()
+        val store = createStoreForTest(TestState()) {
+            reduceWith { state, action ->
+                when (action) {
+                    is IncrementAction -> state.copy(counter = state.counter + action.value)
+                    else -> state
+                }
+            }
+            middleware {
+                persistence(
+                    storage = storage,
+                    strategy = PersistenceStrategy.OnEveryChange
+                )
+            }
+        }
+
+        runCurrent()
+        advanceUntilIdle()
+
+        store.dispatch(IncrementAction(1))
+        runCurrent()
+        advanceUntilIdle()
+        assertEquals(1, storage.state.value.saveCount)
+        assertEquals(1, storage.load()?.counter)
+
+        store.close()
+        val savesAfterClose = storage.state.value.saveCount
+
+        // Even if something tried to mutate, collectors are cancelled
+        store.dispatch(IncrementAction(5))
+        runCurrent()
+        advanceUntilIdle()
+
+        assertEquals(savesAfterClose, storage.state.value.saveCount)
+        assertEquals(1, storage.load()?.counter)
+        assertEquals(1, store.state.value.counter)
     }
 }

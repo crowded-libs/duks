@@ -34,21 +34,46 @@ typealias Reducer<TState> = (TState, Action) -> TState
  * through the middleware chain, and applying reducers to produce new state.
  * It integrates with Compose by exposing state as a Compose State object.
  *
+ * Call [close] when the store is no longer needed to tear down lifecycle-aware
+ * middleware and cancel store-owned coroutines. Closing does not cancel a shared
+ * parent scope provided via [StoreBuilder.scope]; only a child job owned by the store.
+ *
  * @param TState The type of state model used in the store
  * @property initialState The initial state of the store
  * @property reducer The reducer function that processes actions and updates state
  * @property middleware The composed middleware chain to process actions
- * @property ioScope The coroutine scope used for IO operations and middleware processing
+ * @param parentScope Parent coroutine scope; the store launches work on a child of this scope
  */
-class KStore<TState:StateModel> internal constructor(initialState: TState,
-                                                     private val reducer: Reducer<TState>,
-                                                     private val middleware: Middleware<TState>,
-                                                     internal val ioScope: CoroutineScope,
-                                                     private val lifecycleAwareMiddleware: List<StoreLifecycleAware<TState>> = emptyList(),
-                                                     private val logger: Logger = Logger.default()) {
+class KStore<TState:StateModel> internal constructor(
+    initialState: TState,
+    private val reducer: Reducer<TState>,
+    private val middleware: Middleware<TState>,
+    parentScope: CoroutineScope,
+    private val lifecycleAwareMiddleware: List<StoreLifecycleAware<TState>> = emptyList(),
+    private val logger: Logger = Logger.default()
+) {
     
     private val _state = MutableStateFlow(initialState)
     private val _stateMutex = Mutex()
+    private val closeMutex = Mutex()
+    private var closed = false
+
+    /**
+     * Job that owns all store work. Cancelled by [close] without cancelling [parentScope].
+     */
+    private val storeJob = SupervisorJob(parentScope.coroutineContext[Job])
+
+    /**
+     * Coroutine scope for store-owned work (dispatch, persistence collectors, sagas).
+     * This is a child of the scope provided at construction time.
+     */
+    internal val ioScope: CoroutineScope = CoroutineScope(parentScope.coroutineContext + storeJob)
+
+    /**
+     * Whether [close] has completed (or is in progress after the closed flag was set).
+     */
+    val isClosed: Boolean
+        get() = closed
 
     init {
         logger.info(initialState::class.simpleName) { "Creating KStore with initial state type: {stateType}" }
@@ -104,10 +129,15 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
      *
      * The action is processed asynchronously through the middleware chain
      * and then delivered to the reducer to produce a new state if needed.
+     * No-ops if the store has been [close]d.
      *
      * @param action The action to dispatch
      */
     fun dispatch(action: Action) {
+        if (closed) {
+            logger.warn(action::class.simpleName) { "Ignoring dispatch of {actionType} on closed store" }
+            return
+        }
         logger.trace(action::class.simpleName) { "Dispatching action: {actionType}" }
         ioScope.launch {
             processAction(action)
@@ -130,6 +160,40 @@ class KStore<TState:StateModel> internal constructor(initialState: TState,
                 applyReducer(a)
             }
         }, action)
+    }
+
+    /**
+     * Tears down the store: notifies lifecycle-aware middleware via
+     * [StoreLifecycleAware.onStoreDestroyed], then cancels store-owned coroutines.
+     *
+     * Safe to call more than once; subsequent calls are no-ops.
+     * Does not cancel a shared parent scope passed to [StoreBuilder.scope].
+     */
+    suspend fun close() {
+        val shouldClose = closeMutex.withLock {
+            if (closed) {
+                false
+            } else {
+                closed = true
+                true
+            }
+        }
+        if (!shouldClose) {
+            logger.debug { "KStore.close() ignored — already closed" }
+            return
+        }
+
+        logger.info { "Closing KStore" }
+        lifecycleAwareMiddleware.forEach { middleware ->
+            try {
+                middleware.onStoreDestroyed()
+            } catch (e: Exception) {
+                logger.error(e) { "Error notifying middleware of store destruction" }
+            }
+        }
+        storeJob.cancel()
+        storeJob.join()
+        logger.info { "KStore closed" }
     }
 
     internal val stateAccessor: StateAccessor = object : StateAccessor {
