@@ -29,7 +29,7 @@ Related libraries in the ecosystem (separate artifacts): `duks-routing`, `duks-s
 
 ```kotlin
 dependencies {
-    implementation("io.github.crowded-libs:duks:0.3.0")
+    implementation("io.github.crowded-libs:duks:0.4.0")
 }
 ```
 
