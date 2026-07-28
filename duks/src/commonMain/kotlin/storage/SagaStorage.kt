@@ -142,27 +142,31 @@ interface SagaStateSerializer {
  */
 sealed class SagaPersistenceStrategy {
     /**
-     * Persist on every saga lifecycle event (start, update, complete).
+     * Persist on every saga start/update. Completed sagas are removed from storage.
      */
     data object OnEveryChange : SagaPersistenceStrategy()
-    
+
     /**
-     * Persist with debouncing to avoid excessive writes.
+     * Persist start/update after [delayMs] of quiet; coalesces rapid updates per instance.
+     * Completed sagas cancel pending writes and are removed from storage.
      */
     data class Debounced(val delayMs: Long) : SagaPersistenceStrategy()
-    
+
     /**
-     * Persist only at specific checkpoints defined by the saga.
+     * Persist only when a saga handler calls [duks.SagaContext.checkpoint].
+     * Completed sagas are removed from storage.
      */
     data object OnCheckpoint : SagaPersistenceStrategy()
-    
+
     /**
-     * Persist when saga completes or fails.
+     * Do not persist intermediate updates; completed sagas are removed from storage.
+     * Use with other strategies via [Combined] when you only want cleanup semantics
+     * alongside a write strategy.
      */
     data object OnCompletion : SagaPersistenceStrategy()
-    
+
     /**
-     * Combine multiple strategies.
+     * Combine multiple strategies (any matching write strategy may persist).
      */
     data class Combined(val strategies: List<SagaPersistenceStrategy>) : SagaPersistenceStrategy()
 }

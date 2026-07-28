@@ -49,7 +49,6 @@ class SagaTest {
                 sagas {
                     saga<CounterSagaState>(
                         name = "CounterSaga",
-                        initialState = { CounterSagaState("") }
                     ) {
                         startsOn<TriggerAction> { action ->
                             SagaTransition.Continue(
@@ -132,7 +131,6 @@ class SagaTest {
                 sagas {
                     saga<CounterSagaState>(
                         name = "FilteredSaga",
-                        initialState = { CounterSagaState("") }
                     ) {
                         startsOn<TriggerAction>(
                             condition = { it.id.startsWith("filter-") }
@@ -183,7 +181,6 @@ class SagaTest {
                 sagas {
                     saga<CounterSagaState>(
                         name = "LifecycleSaga",
-                        initialState = { CounterSagaState("") }
                     ) {
                         startsOn<TriggerAction> { action ->
                             sagaStateUpdates.add("start:${action.id}")
@@ -254,7 +251,6 @@ class SagaTest {
                 sagas {
                     saga<MultiStepSagaState>(
                         name = "EffectsSaga",
-                        initialState = { MultiStepSagaState("") }
                     ) {
                         startsOn<TriggerAction> { action ->
                             effectsExecuted.add("saga-start:${action.id}")
@@ -343,7 +339,6 @@ class SagaTest {
                 sagas {
                     saga<ParentSagaState>(
                         name = "ParentSaga",
-                        initialState = { ParentSagaState() }
                     ) {
                         startsOn<StartParent> { action ->
                             sagaEvents.add("parent-started:${action.id}")
@@ -363,7 +358,6 @@ class SagaTest {
                     
                     saga<ChildSagaState>(
                         name = "ChildSaga", 
-                        initialState = { ChildSagaState("") }
                     ) {
                         startsOn<StartChild> { action ->
                             sagaEvents.add("child-started:${action.parentId}")

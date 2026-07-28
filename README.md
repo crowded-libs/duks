@@ -298,10 +298,7 @@ val store = createStore(AppState()) {
         exceptionHandling()
         sagas {
             register(OnboardingSaga())
-            saga(
-                name = "payment",
-                initialState = { PaymentSagaState() }
-            ) {
+            saga("payment") {
                 startsOn<InitiatePayment> { action ->
                     SagaTransition.Continue(
                         PaymentSagaState(orderId = action.orderId),

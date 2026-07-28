@@ -2,6 +2,7 @@ package duks.storage
 
 import duks.*
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
@@ -63,7 +64,6 @@ class SagaPersistenceTest {
                 ) {
                     saga<TestSagaState>(
                         name = "TestSaga",
-                        initialState = { TestSagaState("") }
                     ) {
                         startsOn<StartTestSaga> { action ->
                             SagaTransition.Continue(
@@ -161,7 +161,6 @@ class SagaPersistenceTest {
                 ) {
                     saga<TestSagaState>(
                         name = "TestSaga",
-                        initialState = { TestSagaState("") }
                     ) {
                         startsOn<StartTestSaga> { action ->
                             SagaTransition.Continue(
@@ -209,7 +208,6 @@ class SagaPersistenceTest {
                 ) {
                     saga<TestSagaState>(
                         name = "TestSaga",
-                        initialState = { TestSagaState("") }
                     ) {
                         startsOn<StartTestSaga> { action ->
                             SagaTransition.Continue(
@@ -278,7 +276,6 @@ class SagaPersistenceTest {
                 ) {
                     saga<TestSagaState>(
                         name = "TestSaga",
-                        initialState = { TestSagaState("") }
                     ) {
                         startsOn<StartTestSaga> { action ->
                             SagaTransition.Continue(TestSagaState(id = action.sagaId, counter = 0))
@@ -337,7 +334,6 @@ class SagaPersistenceTest {
                     ) {
                         saga<TestSagaState>(
                             name = "TestSaga",
-                            initialState = { TestSagaState("") }
                         ) {
                             startsOn<StartTestSaga> { action ->
                                 SagaTransition.Continue(TestSagaState(id = action.sagaId))
@@ -349,5 +345,100 @@ class SagaPersistenceTest {
             }
             assertNotNull(testStore, "Store with strategy $strategy should be created successfully")
         }
+    }
+
+    @Test
+    fun `Debounced strategy persists after quiet period not immediately`() = runTest(timeout = 5.seconds) {
+        val sagaStorage = InMemorySagaStorage()
+
+        val store = createStoreForTest(TestAppState()) {
+            middleware {
+                sagas(
+                    storage = sagaStorage,
+                    persistenceStrategy = SagaPersistenceStrategy.Debounced(500)
+                ) {
+                    saga<TestSagaState>(name = "TestSaga") {
+                        startsOn<StartTestSaga> { action ->
+                            SagaTransition.Continue(TestSagaState(id = action.sagaId, counter = 0))
+                        }
+                        on<UpdateTestSaga>(
+                            condition = { action, state -> action.sagaId == state.id }
+                        ) { action, state ->
+                            SagaTransition.Continue(state.copy(counter = state.counter + action.increment))
+                        }
+                    }
+                }
+            }
+            reduceWith { state, _ -> state }
+        }
+
+        dispatchAndAdvance(store, StartTestSaga("d1"))
+        // Before debounce elapses, storage should still be empty
+        advanceTimeBy(100)
+        runCurrent()
+        assertTrue(sagaStorage.getAllSagaIds().isEmpty(), "Should not persist before debounce")
+
+        advanceTimeBy(500)
+        runCurrent()
+        advanceUntilIdle()
+
+        assertEquals(1, sagaStorage.getAllSagaIds().size, "Should persist after debounce")
+        val persisted = sagaStorage.load(sagaStorage.getAllSagaIds().first())!!
+        assertEquals(0, (persisted.state as TestSagaState).counter)
+
+        dispatchAndAdvance(store, UpdateTestSaga("d1", 5))
+        advanceTimeBy(100)
+        runCurrent()
+        // Still old value until debounce
+        val mid = sagaStorage.load(sagaStorage.getAllSagaIds().first())!!
+        assertEquals(0, (mid.state as TestSagaState).counter)
+
+        advanceTimeBy(500)
+        runCurrent()
+        advanceUntilIdle()
+        val after = sagaStorage.load(sagaStorage.getAllSagaIds().first())!!
+        assertEquals(5, (after.state as TestSagaState).counter)
+    }
+
+    @Test
+    fun `OnCheckpoint strategy only persists on checkpoint`() = runTest(timeout = 5.seconds) {
+        val sagaStorage = InMemorySagaStorage()
+
+        val store = createStoreForTest(TestAppState()) {
+            middleware {
+                sagas(
+                    storage = sagaStorage,
+                    persistenceStrategy = SagaPersistenceStrategy.OnCheckpoint
+                ) {
+                    saga<TestSagaState>(name = "TestSaga") {
+                        startsOn<StartTestSaga> { action ->
+                            SagaTransition.Continue(TestSagaState(id = action.sagaId, counter = 0))
+                        }
+                        on<UpdateTestSaga>(
+                            condition = { action, state -> action.sagaId == state.id }
+                        ) { action, state ->
+                            val next = state.copy(counter = state.counter + action.increment)
+                            checkpoint()
+                            SagaTransition.Continue(next)
+                        }
+                    }
+                }
+            }
+            reduceWith { state, _ -> state }
+        }
+
+        dispatchAndAdvance(store, StartTestSaga("c1"))
+        advanceTimeBy(50)
+        runCurrent()
+        advanceUntilIdle()
+        assertTrue(sagaStorage.getAllSagaIds().isEmpty(), "Start without checkpoint should not persist")
+
+        dispatchAndAdvance(store, UpdateTestSaga("c1", 2))
+        advanceTimeBy(50)
+        runCurrent()
+        advanceUntilIdle()
+
+        // checkpoint() runs before Continue updates instance state — still validates write path
+        assertEquals(1, sagaStorage.getAllSagaIds().size, "Checkpoint should persist instance")
     }
 }

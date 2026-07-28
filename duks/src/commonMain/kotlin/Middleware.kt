@@ -105,7 +105,10 @@ fun <TState:StateModel> asyncMiddleware(): Middleware<TState> = { store, next, a
                 dispatchedActions.add(actionFromFlow)
                 store.dispatch(actionFromFlow)
             }
-            AsyncActionsDispatched(dispatchedActions)
+            val summary = AsyncActionsDispatched(dispatchedActions)
+            // Deliver summary through the chain so reducers/middleware can observe completion.
+            next(summary)
+            summary
         }
         else -> {
             next(action)

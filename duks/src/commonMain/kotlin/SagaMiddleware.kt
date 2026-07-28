@@ -8,7 +8,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
 
 /**
- * Saga lifecycle events for determining when to persist.
+ * Saga lifecycle events for persistence decisions.
  */
 private enum class SagaEvent {
     Started,
@@ -17,21 +17,8 @@ private enum class SagaEvent {
 }
 
 /**
- * Determines if a saga should be persisted based on the strategy and event.
- */
-private fun shouldPersist(strategy: SagaPersistenceStrategy, event: SagaEvent): Boolean {
-    return when (strategy) {
-        is SagaPersistenceStrategy.OnEveryChange -> true
-        is SagaPersistenceStrategy.Debounced -> event != SagaEvent.Completed // Debounced handles its own timing
-        is SagaPersistenceStrategy.OnCheckpoint -> false // Only on explicit checkpoints
-        is SagaPersistenceStrategy.OnCompletion -> event == SagaEvent.Completed
-        is SagaPersistenceStrategy.Combined -> strategy.strategies.any { shouldPersist(it, event) }
-    }
-}
-
-/**
  * Creates saga middleware that manages saga instances and their lifecycle.
- * 
+ *
  * @param registry The saga registry containing all saga definitions
  * @param storage Optional storage for saga persistence. If provided, sagas will be persisted and restored automatically.
  * @param persistenceStrategy The strategy for when to persist saga state (defaults to OnEveryChange)
@@ -53,14 +40,21 @@ private class SagaMiddlewareImpl<TState : StateModel>(
     private val persistenceStrategy: SagaPersistenceStrategy,
     private val logger: Logger
 ) : Middleware<TState>, StoreLifecycleAware<TState> {
-    
+
     private val instanceManager = SagaInstanceManager()
     private var store: KStore<TState>? = null
-    
+    private var persistence: SagaPersistenceController? = null
+
     override suspend fun onStoreCreated(store: KStore<TState>) {
         this.store = store
-        
-        // Restore persisted sagas on startup
+        persistence = SagaPersistenceController(
+            storage = storage,
+            strategy = persistenceStrategy,
+            scope = store.ioScope,
+            logger = logger,
+            getInstance = { id -> instanceManager.getInstance(id) }
+        )
+
         if (storage != null) {
             try {
                 val sagaIds = storage.getAllSagaIds()
@@ -75,24 +69,171 @@ private class SagaMiddlewareImpl<TState : StateModel>(
             }
         }
     }
-    
+
+    override suspend fun onStoreDestroyed() {
+        persistence?.cancelAll()
+        persistence = null
+        store = null
+    }
+
     override suspend fun invoke(
         store: KStore<TState>,
         next: suspend (Action) -> Action,
         action: Action
     ): Action {
         val result = next(action)
-        
-        // Process action through all registered sagas
+
         store.ioScope.launch {
             try {
-                processAction(action, store,  registry, instanceManager, storage, persistenceStrategy, logger)
+                processAction(
+                    action = action,
+                    store = store,
+                    registry = registry,
+                    instanceManager = instanceManager,
+                    persistence = persistence,
+                    logger = logger
+                )
             } catch (e: Exception) {
                 logger.error(e) { "Error in saga middleware" }
             }
         }
-        
+
         return result
+    }
+}
+
+/**
+ * Handles write/remove/debounce/checkpoint persistence for sagas.
+ */
+private class SagaPersistenceController(
+    private val storage: SagaStorage?,
+    private val strategy: SagaPersistenceStrategy,
+    private val scope: CoroutineScope,
+    private val logger: Logger,
+    private val getInstance: suspend (String) -> SagaInstance<*>?
+) {
+    private val debounceJobs = mutableMapOf<String, Job>()
+    private val mutex = Mutex()
+
+    suspend fun onStarted(instance: SagaInstance<*>) {
+        persistForEvent(instance, SagaEvent.Started)
+    }
+
+    suspend fun onUpdated(instance: SagaInstance<*>) {
+        persistForEvent(instance, SagaEvent.Updated)
+    }
+
+    suspend fun onCompleted(instanceId: String) {
+        cancelDebounce(instanceId)
+        if (storage == null) return
+        try {
+            storage.remove(instanceId)
+        } catch (e: Exception) {
+            logger.error(e, instanceId) { "Failed to remove completed saga instance {id}" }
+        }
+    }
+
+    suspend fun checkpoint(instanceId: String) {
+        if (storage == null) return
+        if (!includesCheckpoint(strategy)) {
+            logger.debug(instanceId) {
+                "Saga checkpoint ignored for {id} — strategy does not include OnCheckpoint"
+            }
+            return
+        }
+        val instance = getInstance(instanceId) ?: run {
+            logger.warn(instanceId) { "Saga checkpoint failed — instance {id} not found" }
+            return
+        }
+        try {
+            storage.save(instanceId, instance)
+            logger.debug(instanceId) { "Saga checkpoint persisted for {id}" }
+        } catch (e: Exception) {
+            logger.error(e, instanceId) { "Failed to checkpoint saga instance {id}" }
+        }
+    }
+
+    suspend fun cancelAll() {
+        mutex.withLock {
+            debounceJobs.values.forEach { it.cancel() }
+            debounceJobs.clear()
+        }
+    }
+
+    private suspend fun persistForEvent(instance: SagaInstance<*>, event: SagaEvent) {
+        if (storage == null) return
+        applyStrategy(strategy, instance, event)
+    }
+
+    private suspend fun applyStrategy(
+        strategy: SagaPersistenceStrategy,
+        instance: SagaInstance<*>,
+        event: SagaEvent
+    ) {
+        when (strategy) {
+            is SagaPersistenceStrategy.OnEveryChange -> {
+                if (event != SagaEvent.Completed) {
+                    saveNow(instance)
+                }
+            }
+            is SagaPersistenceStrategy.Debounced -> {
+                if (event != SagaEvent.Completed) {
+                    scheduleDebounced(instance, strategy.delayMs)
+                }
+            }
+            is SagaPersistenceStrategy.OnCheckpoint -> {
+                // Explicit checkpoint() only
+            }
+            is SagaPersistenceStrategy.OnCompletion -> {
+                // Intermediate writes skipped; completion removes via onCompleted
+            }
+            is SagaPersistenceStrategy.Combined -> {
+                strategy.strategies.forEach { applyStrategy(it, instance, event) }
+            }
+        }
+    }
+
+    private suspend fun saveNow(instance: SagaInstance<*>) {
+        val storage = storage ?: return
+        try {
+            storage.save(instance.id, instance)
+        } catch (e: Exception) {
+            logger.error(e, instance.id) { "Failed to persist saga instance {id}" }
+        }
+    }
+
+    private suspend fun scheduleDebounced(instance: SagaInstance<*>, delayMs: Long) {
+        val storage = storage ?: return
+        mutex.withLock {
+            debounceJobs[instance.id]?.cancel()
+            debounceJobs[instance.id] = scope.launch {
+                delay(delayMs)
+                val latest = getInstance(instance.id) ?: return@launch
+                try {
+                    storage.save(latest.id, latest)
+                } catch (e: Exception) {
+                    logger.error(e, latest.id) { "Failed to persist debounced saga instance {id}" }
+                } finally {
+                    mutex.withLock {
+                        debounceJobs.remove(latest.id)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun cancelDebounce(instanceId: String) {
+        mutex.withLock {
+            debounceJobs.remove(instanceId)?.cancel()
+        }
+    }
+
+    private fun includesCheckpoint(strategy: SagaPersistenceStrategy): Boolean {
+        return when (strategy) {
+            is SagaPersistenceStrategy.OnCheckpoint -> true
+            is SagaPersistenceStrategy.Combined -> strategy.strategies.any { includesCheckpoint(it) }
+            else -> false
+        }
     }
 }
 
@@ -102,13 +243,13 @@ private class SagaMiddlewareImpl<TState : StateModel>(
 private class SagaInstanceManager {
     private val instances = mutableMapOf<String, SagaInstance<*>>()
     private val mutex = Mutex()
-    
+
     suspend fun addInstance(instance: SagaInstance<*>) {
         mutex.withLock {
             instances[instance.id] = instance
         }
     }
-    
+
     suspend fun updateInstance(instanceId: String, newState: Any) {
         mutex.withLock {
             val current = instances[instanceId]
@@ -121,19 +262,19 @@ private class SagaInstanceManager {
             }
         }
     }
-    
+
     suspend fun removeInstance(instanceId: String) {
         mutex.withLock {
             instances.remove(instanceId)
         }
     }
-    
+
     suspend fun getActiveInstances(): List<SagaInstance<*>> {
         mutex.withLock {
             return instances.values.toList()
         }
     }
-    
+
     suspend fun getInstance(instanceId: String): SagaInstance<*>? {
         mutex.withLock {
             return instances[instanceId]
@@ -149,26 +290,23 @@ private suspend fun <TState : StateModel> processAction(
     store: KStore<TState>,
     registry: SagaRegistry<TState>,
     instanceManager: SagaInstanceManager,
-    storage: SagaStorage?,
-    persistenceStrategy: SagaPersistenceStrategy,
+    persistence: SagaPersistenceController?,
     logger: Logger
 ) {
-    // Check for new saga triggers
     registry.sagas.values.forEach { configuredSaga ->
         try {
-            checkAndStartSaga(action, configuredSaga, store, instanceManager, storage, persistenceStrategy, logger)
+            checkAndStartSaga(action, configuredSaga, store, instanceManager, persistence, logger)
         } catch (e: Exception) {
             logger.error(e, configuredSaga.name) { "Error starting saga {name}" }
         }
     }
-    
-    // Process action through active saga instances
+
     val activeInstances = instanceManager.getActiveInstances()
     activeInstances.forEach { instance ->
         try {
             val saga = registry.sagas[instance.sagaName]
             if (saga != null) {
-                processInstanceAction(action, instance, saga, store, instanceManager, storage, persistenceStrategy, logger)
+                processInstanceAction(action, instance, saga, store, instanceManager, persistence, logger)
             }
         } catch (e: Exception) {
             logger.error(e, instance.id) { "Error processing saga instance {id}" }
@@ -184,42 +322,37 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
     saga: ConfiguredSaga<*>,
     store: KStore<TState>,
     instanceManager: SagaInstanceManager,
-    storage: SagaStorage?,
-    persistenceStrategy: SagaPersistenceStrategy,
+    persistence: SagaPersistenceController?,
     logger: Logger
 ) {
     @Suppress("UNCHECKED_CAST")
     val typedSaga = saga as ConfiguredSaga<Any>
-    
-    // Find matching start handlers
+
     val allHandlers = typedSaga.configuration.getHandlers()
     val startHandlers = mutableListOf<SagaHandler<Any>>()
-    
+
     for (handler in allHandlers) {
         if (handler.canHandle(action, null)) {
             startHandlers.add(handler)
         }
     }
-    
+
     if (startHandlers.isNotEmpty()) {
         val instanceId = generateSagaId(saga.name)
-        val context = SagaContextImpl<Any>(instanceId, store, { action ->
-            store.dispatch(action)
-            action
-        }, logger)
-        
-        // Execute the first matching handler
+        val context = createContext(instanceId, store, persistence, logger)
+
         val handler = startHandlers.first()
         val transition = try {
             handler.handle(action, null, context)
         } catch (e: Exception) {
-            logger.error(e, saga.name, instanceId, e.message) { "Saga {sagaName} with id {sagaId} failed during start: {error}" }
+            logger.error(e, saga.name, instanceId, e.message) {
+                "Saga {sagaName} with id {sagaId} failed during start: {error}"
+            }
             throw e
         }
-        
+
         when (transition) {
             is SagaTransition.Continue -> {
-                // Create new saga instance
                 val instance = SagaInstance(
                     id = instanceId,
                     sagaName = saga.name,
@@ -229,21 +362,10 @@ private suspend fun <TState : StateModel> checkAndStartSaga(
                 )
                 instanceManager.addInstance(instance)
                 logger.info(saga.name, instanceId) { "Saga started: {sagaName} with id {sagaId}" }
-                
-                // Persist the new saga instance if storage is configured
-                if (storage != null && shouldPersist(persistenceStrategy, SagaEvent.Started)) {
-                    try {
-                        storage.save(instanceId, instance)
-                    } catch (e: Exception) {
-                        logger.error(e, instanceId) { "Failed to persist saga instance {instanceId}" }
-                    }
-                }
-                
-                // Execute effects
+                persistence?.onStarted(instance)
                 executeEffects(transition.effects, context)
             }
             is SagaTransition.Complete -> {
-                // Just execute effects, no instance to create
                 executeEffects(transition.effects, context)
             }
         }
@@ -259,32 +381,26 @@ private suspend fun <TState : StateModel> processInstanceAction(
     saga: ConfiguredSaga<*>,
     store: KStore<TState>,
     instanceManager: SagaInstanceManager,
-    storage: SagaStorage?,
-    persistenceStrategy: SagaPersistenceStrategy,
+    persistence: SagaPersistenceController?,
     logger: Logger
 ) {
     @Suppress("UNCHECKED_CAST")
     val typedSaga = saga as ConfiguredSaga<Any>
     @Suppress("UNCHECKED_CAST")
     val typedInstance = instance as SagaInstance<Any>
-    
-    // Find matching handlers for active instances
+
     val allHandlers = typedSaga.configuration.getHandlers()
     val activeHandlers = mutableListOf<SagaHandler<Any>>()
-    
+
     for (handler in allHandlers) {
         if (handler.canHandle(action, typedInstance.state)) {
             activeHandlers.add(handler)
         }
     }
-    
+
     if (activeHandlers.isNotEmpty()) {
-        val context = SagaContextImpl<Any>(instance.id, store, { action ->
-            store.dispatch(action)
-            action
-        }, logger)
-        
-        // Execute the first matching handler
+        val context = createContext(instance.id, store, persistence, logger)
+
         val handler = activeHandlers.first()
         val transition = try {
             handler.handle(action, typedInstance.state, context)
@@ -292,46 +408,42 @@ private suspend fun <TState : StateModel> processInstanceAction(
             logger.error(e, instance.id, e.message) { "Saga {sagaId} failed during action handling: {error}" }
             throw e
         }
-        
+
         when (transition) {
             is SagaTransition.Continue -> {
-                // Update instance state
                 instanceManager.updateInstance(instance.id, transition.newState)
-                
-                // Persist the updated saga instance if storage is configured
-                if (storage != null && shouldPersist(persistenceStrategy, SagaEvent.Updated)) {
-                    val updatedInstance = instanceManager.getInstance(instance.id)
-                    if (updatedInstance != null) {
-                        try {
-                            storage.save(instance.id, updatedInstance)
-                        } catch (e: Exception) {
-                            logger.error(e, instance.id) { "Failed to persist updated saga instance {id}" }
-                        }
-                    }
+                val updated = instanceManager.getInstance(instance.id)
+                if (updated != null) {
+                    persistence?.onUpdated(updated)
                 }
-                
-                // Execute effects
                 executeEffects(transition.effects, context)
             }
             is SagaTransition.Complete -> {
-                // Remove instance
                 instanceManager.removeInstance(instance.id)
                 logger.info(instance.id) { "Saga completed: {sagaId}" }
-                
-                // Remove from persistence if storage is configured
-                if (storage != null) {
-                    try {
-                        storage.remove(instance.id)
-                    } catch (e: Exception) {
-                        logger.error(e, instance.id) { "Failed to remove completed saga instance {id}" }
-                    }
-                }
-                
-                // Execute effects
+                persistence?.onCompleted(instance.id)
                 executeEffects(transition.effects, context)
             }
         }
     }
+}
+
+private fun <TState : StateModel> createContext(
+    instanceId: String,
+    store: KStore<TState>,
+    persistence: SagaPersistenceController?,
+    logger: Logger
+): SagaContextImpl<Any> {
+    return SagaContextImpl(
+        sagaId = instanceId,
+        store = store,
+        dispatchFn = { action ->
+            store.dispatch(action)
+            action
+        },
+        logger = logger,
+        checkpointFn = { persistence?.checkpoint(instanceId) }
+    )
 }
 
 /**
@@ -363,26 +475,30 @@ private class SagaContextImpl<TSagaState>(
     override val sagaId: String,
     private val store: KStore<*>,
     private val dispatchFn: suspend (Action) -> Action,
-    private val logger: Logger
+    private val logger: Logger,
+    private val checkpointFn: suspend () -> Unit
 ) : SagaContext<TSagaState> {
-    
+
     @Suppress("UNCHECKED_CAST")
     override fun <T : StateModel> getStoreState(): T {
         return store.state.value as T
     }
-    
+
     override suspend fun dispatch(action: Action): Action {
         logger.debug(sagaId, action::class.simpleName) { "Saga {sagaId} dispatching action: {action}" }
         return dispatchFn(action)
     }
-    
+
     override suspend fun delay(milliseconds: Long) {
         kotlinx.coroutines.delay(milliseconds)
     }
-    
+
     override suspend fun startSaga(sagaName: String, trigger: Action) {
-        // This will be picked up by the middleware on the next action
         dispatch(trigger)
+    }
+
+    override suspend fun checkpoint() {
+        checkpointFn()
     }
 }
 
@@ -392,4 +508,3 @@ private class SagaContextImpl<TSagaState>(
 private fun generateSagaId(sagaName: String): String {
     return "$sagaName-${Clock.System.now().toEpochMilliseconds()}-${(0..9999).random()}"
 }
-

@@ -95,6 +95,13 @@ interface SagaContext<TSagaState> {
      * Start another saga.
      */
     suspend fun startSaga(sagaName: String, trigger: Action)
+
+    /**
+     * Persist the current saga instance when the persistence strategy includes
+     * [duks.storage.SagaPersistenceStrategy.OnCheckpoint].
+     * No-op when storage is not configured or the strategy does not include checkpoints.
+     */
+    suspend fun checkpoint()
 }
 
 /**
@@ -256,18 +263,19 @@ class SagaRegistry<TStoreState : StateModel> {
     
     /**
      * Define and register a saga inline.
+     *
+     * Initial saga state comes from [SagaTransition.Continue] in a start handler
+     * (`startsOn` / `startsWhen`), not from a separate factory.
      */
     fun <TSagaState : Any> saga(
         name: String,
-        initialState: () -> TSagaState,
         block: SagaConfiguration<TSagaState>.() -> Unit
     ) {
         val configuration = SagaConfiguration<TSagaState>()
         configuration.apply(block)
         sagas[name] = ConfiguredSaga(
             name = name,
-            configuration = configuration,
-            initialStateFactory = initialState
+            configuration = configuration
         )
     }
 }
@@ -277,7 +285,6 @@ class SagaRegistry<TStoreState : StateModel> {
  */
 internal data class ConfiguredSaga<TSagaState>(
     val name: String,
-    val configuration: SagaConfiguration<TSagaState>,
-    val initialStateFactory: (() -> TSagaState)? = null
+    val configuration: SagaConfiguration<TSagaState>
 )
 
